@@ -1,407 +1,378 @@
-/* FloodSense Assam — Application JS
-   Google Maps-style tiles, location pins, colored district borders, plain English UI
-*/
-
 'use strict';
 
+// ── FIX 1: Do NOT call L.latLngBounds() at parse time.
+// Leaflet isn't loaded yet when this file is parsed.
+// Use plain arrays everywhere — Leaflet accepts [[lat,lng],[lat,lng]] directly.
+const ASSAM_VIEW = {
+  center:  [26.2006, 92.9376],
+  bounds:  [[24.0, 89.45], [28.45, 96.15]], // plain array, NOT L.latLngBounds()
+  minZoom: 7,
+  maxZoom: 11.5,
+};
+
+const RISK_STYLES = {
+  low:      { fill: '#2ecc71', stroke: '#157347', text: 'Low' },
+  moderate: { fill: '#ffcc00', stroke: '#b38700', text: 'Moderate' },
+  high:     { fill: '#e31a1c', stroke: '#991b1b', text: 'High' },
+};
+
 const state = {
-  districts: [],
-  metrics: null,
-  selected: null,
-  map: null,
-  geojsonLayer: null,
-  markers: [],
+  map:              null,
+  geojsonData:      null,
+  geojsonLayer:     null,
+  districtData:     [],
+  layerIndex:       new Map(),
+  selectedDistrict: null,
+  loading:          false,
 };
 
-const RISK = {
-  high:     { color: '#c0392b', fill: 'rgba(192,57,43,0.18)', border: '#c0392b', weight: 3 },
-  moderate: { color: '#e67e22', fill: 'rgba(230,126,34,0.15)', border: '#e67e22', weight: 2.5 },
-  low:      { color: '#27ae60', fill: 'rgba(39,174,96,0.08)',  border: '#27ae60', weight: 1.5 },
-};
-
-const TIPS = {
-  high: [
-    'Move to higher ground immediately if near a river or low-lying area',
-    'Do not attempt to cross flooded roads or bridges',
-    'Contact the ASDMA helpline (1070) for evacuation assistance',
-    'Carry essential documents and emergency supplies',
-    'Stay tuned to All India Radio (AIR) and official ASDMA updates',
-  ],
-  moderate: [
-    'Keep essential items ready in case of sudden rise in water level',
-    'Monitor river levels closely through local authorities',
-    'Avoid travelling to flood-prone areas unless necessary',
-    'Store drinking water and dry food for at least 3 days',
-    'Keep emergency contact numbers saved on your phone',
-  ],
-  low: [
-    'No immediate flood threat — continue monitoring weather updates',
-    'Check ASDMA website for seasonal flood preparedness guides',
-    'Ensure drains near your home are clear of blockages',
-    'Report any unusual rise in river or water body levels to local authorities',
-  ],
-};
-
-const FACTOR_ICONS = {
-  'river_level':   { icon: '🌊', label: 'River level' },
-  'pct_to_danger': { icon: '📏', label: 'Distance from danger level' },
-  'rain_3d':       { icon: '🌧️', label: '3-day rainfall' },
-  'rain_7d':       { icon: '☔', label: '7-day rainfall' },
-  'rain_1d':       { icon: '🌦️', label: "Today's rainfall" },
-  'level_delta':   { icon: '📈', label: 'Water level change' },
-  'level_trend':   { icon: '📊', label: 'River level trend' },
-  'upstream_3d':   { icon: '🏔️', label: 'Upstream catchment rain' },
-  'is_monsoon':    { icon: '🌀', label: 'Monsoon season active' },
-};
-
-// ── Boot ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   initMap();
-  loadData();
+  bindUI();
+  loadDashboardData();
 });
 
-async function loadData() {
-  setStatus('loading', 'Loading risk data…');
-  try {
-    const [distRes, metRes] = await Promise.all([
-      fetch('/api/districts'),
-      fetch('/api/metrics'),
-    ]);
-    const distData = await distRes.json();
-    state.districts = distData.districts || [];
-    state.metrics = await metRes.json();
-
-    renderMapData();
-    renderSummaryStrip();
-    document.getElementById('updateTime').textContent =
-      new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
-
-    document.getElementById('loadingOverlay').style.display = 'none';
-    document.getElementById('summaryStrip').style.display = 'block';
-    setStatus('ready', 'Live data active');
-  } catch (err) {
-    console.error(err);
-    setStatus('loading', 'Retrying…');
-    setTimeout(loadData, 3000);
-  }
+function bindUI() {
+  document.getElementById('refreshButton').addEventListener('click', () => {
+    loadDashboardData({ forceRefresh: true });
+  });
+  document.getElementById('panelClose').addEventListener('click', closePanel);
+  document.getElementById('panelScrim').addEventListener('click', closePanel);
 }
 
-function setStatus(type, text) {
-  const dot = document.getElementById('statusDot');
-  dot.className = 'status-dot-live ' + type;
-  document.getElementById('statusText').textContent = text;
-}
-
-// ── Map Init — Google Maps Light tiles ───────────────────────────────
 function initMap() {
   state.map = L.map('map', {
-    zoomControl: true,
-    attributionControl: false,
-    scrollWheelZoom: true,
+    zoomControl:         true,
+    attributionControl:  false,
+    minZoom:             ASSAM_VIEW.minZoom,
+    maxZoom:             ASSAM_VIEW.maxZoom,
+    zoomSnap:            0.25,
+    zoomDelta:           0.25,
+    worldCopyJump:       false,
+    maxBounds:           ASSAM_VIEW.bounds,   // Leaflet accepts plain array here
+    maxBoundsViscosity:  1.0,
+    preferCanvas:        true,
+  }).setView(ASSAM_VIEW.center, ASSAM_VIEW.minZoom);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd',
+    maxZoom:    ASSAM_VIEW.maxZoom,
+    noWrap:     true,
+    bounds:     ASSAM_VIEW.bounds,
+  }).addTo(state.map);
+
+  state.map.zoomControl.setPosition('bottomleft');
+  state.map.on('drag', () => {
+    state.map.panInsideBounds(ASSAM_VIEW.bounds, { animate: false });
   });
-
-  // Google Maps-style road map tiles (Carto Light is closest free equivalent)
-  L.tileLayer(
-    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    { subdomains: 'abcd', maxZoom: 14 }
-  ).addTo(state.map);
-
-  // Move zoom control to top-right
-  state.map.zoomControl.setPosition('topright');
 }
 
-// ── Render map layers ─────────────────────────────────────────────────
-function renderMapData() {
-  const riskMap = {};
-  state.districts.forEach(d => { riskMap[d.district] = d; });
+async function loadDashboardData(options = {}) {
+  if (state.loading) return;
 
-  fetch('/static/data/assam_districts.geojson')
-    .then(r => r.json())
-    .then(geojson => {
-      if (state.geojsonLayer) state.geojsonLayer.remove();
-      state.markers.forEach(m => m.remove());
-      state.markers = [];
+  state.loading = true;
+  setLoadingState(true);
+  showOverlay('Loading district risk data…');
+  setMapStatus(options.forceRefresh ? 'Refreshing district data...' : 'Loading latest district data...');
 
-      // GeoJSON district polygons with colored borders
-      state.geojsonLayer = L.geoJSON(geojson, {
-        style: feature => {
-          const name = getPropName(feature);
-          const d = matchDistrict(name, riskMap);
-          const risk = d ? d.risk : 'low';
-          const s = RISK[risk];
-          return {
-            fillColor:   s.fill,
-            fillOpacity: 1,
-            color:       s.border,
-            weight:      s.weight,
-            opacity:     0.9,
-            dashArray:   risk === 'low' ? '4 3' : null,
-          };
-        },
-        onEachFeature: (feature, layer) => {
-          const name = getPropName(feature);
-          const d = matchDistrict(name, riskMap);
-
-          if (!d) return;
-
-          // Tooltip on hover
-          layer.bindTooltip(makeTooltip(d), {
-            sticky: true, opacity: 1, className: '',
-          });
-
-          // Highlight on hover
-          layer.on('mouseover', e => {
-            const l = e.target;
-            l.setStyle({ weight: RISK[d.risk].weight + 1.5, fillOpacity: 0.35 });
-          });
-          layer.on('mouseout', e => {
-            state.geojsonLayer.resetStyle(e.target);
-          });
-          layer.on('click', () => {
-            selectDistrict(d);
-            document.getElementById('mapHint').classList.add('hidden');
-          });
-        },
-      }).addTo(state.map);
-
-      state.map.fitBounds(state.geojsonLayer.getBounds(), { padding: [20, 20] });
-
-      // Add location pins for high + moderate districts
-      state.districts
-        .filter(d => d.risk !== 'low')
-        .forEach(d => addPin(d));
-
-      // Alert banner
-      const highCount = state.districts.filter(d => d.risk === 'high').length;
-      if (highCount > 0) {
-        const banner = document.getElementById('alertBanner');
-        const highNames = state.districts
-          .filter(d => d.risk === 'high')
-          .map(d => d.district)
-          .join(', ');
-        document.getElementById('alertBannerText').textContent =
-          `⚠ Flood alert active in: ${highNames}. Follow ASDMA advisories and call 1070 for help.`;
-        banner.style.display = 'block';
-        document.body.classList.add('has-alert');
-      }
-    });
-}
-
-function getPropName(feature) {
-  return feature.properties?.district || feature.properties?.DISTRICT ||
-         feature.properties?.NAME_2   || feature.properties?.name || '';
-}
-
-function matchDistrict(geoName, riskMap) {
-  if (!geoName) return null;
-  const clean = geoName.trim();
-  if (riskMap[clean]) return riskMap[clean];
-  for (const key of Object.keys(riskMap)) {
-    if (clean.toLowerCase().includes(key.toLowerCase()) ||
-        key.toLowerCase().includes(clean.toLowerCase())) {
-      return riskMap[key];
+  try {
+    // ── FIX 2: Fetch GeoJSON and ML data in parallel
+    const requests = [fetchDistricts()];  // polls until training done
+    if (!state.geojsonData) {
+      requests.push(fetchJson('/static/data/assam_districts.geojson'));
     }
+
+    const [districtPayload, geojsonPayload] = await Promise.all(requests);
+    state.districtData = Array.isArray(districtPayload.districts) ? districtPayload.districts : [];
+
+    if (geojsonPayload) {
+      state.geojsonData = geojsonPayload;
+    }
+
+    renderStats();
+    renderTimestamp();
+    renderMapLayer();
+    syncSelectedDistrict();
+
+    setMapStatus('Hover a district for quick risk. Click for detailed analytics.');
+    hideOverlay();   // ── FIX 3: explicit hide with both hidden + display:none
+  } catch (error) {
+    console.error('loadDashboardData error:', error);
+    hideOverlay();
+    setMapStatus('Could not load data. Check the server is running, then click Refresh.');
+  } finally {
+    state.loading = false;
+    setLoadingState(false);
   }
-  return null;
 }
 
-// ── Location Pin Markers ──────────────────────────────────────────────
-function addPin(d) {
-  // Get centroid of district from geojson (approximate via bounds of layer)
-  // We'll use a custom DivIcon shaped like a Google Maps pin
-  const pinColor = d.risk === 'high' ? '#c0392b' : '#e67e22';
-  const svgPin = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 32">
-      <path d="M12 0C7.58 0 4 3.58 4 8c0 7.5 8 16 8 16s8-8.5 8-16c0-4.42-3.58-8-8-8z"
-            fill="${pinColor}" stroke="white" stroke-width="1.2"/>
-      <circle cx="12" cy="8.5" r="3.2" fill="white"/>
-    </svg>`;
+// ── FIX 3: Overlay helpers that work regardless of CSS specificity conflicts.
+// Using both `hidden` attribute AND explicit style.display so there's no
+// CSS override fight (the old code used only `hidden` but CSS had display:grid).
+function showOverlay(message) {
+  const el = document.getElementById('loadingOverlay');
+  if (!el) return;
+  const copy = el.querySelector('.loading-copy');
+  if (copy && message) copy.textContent = message;
+  el.removeAttribute('hidden');
+  el.style.display = '';          // let CSS rule (display:grid) take over
+}
 
-  const icon = L.divIcon({
-    html: svgPin,
-    className: '',
-    iconSize: [28, 36],
-    iconAnchor: [14, 36],
-    tooltipAnchor: [0, -30],
+function hideOverlay() {
+  const el = document.getElementById('loadingOverlay');
+  if (!el) return;
+  el.setAttribute('hidden', '');
+  el.style.display = 'none';     // belt-and-suspenders: force hide regardless of CSS
+}
+
+function renderStats() {
+  const high     = state.districtData.filter(d => d.risk === 'high').length;
+  const moderate = state.districtData.filter(d => d.risk === 'moderate').length;
+  const low      = state.districtData.filter(d => d.risk === 'low').length;
+
+  document.getElementById('districtCount').textContent      = state.districtData.length || 33;
+  document.getElementById('highRiskCount').textContent      = high;
+  document.getElementById('moderateRiskCount').textContent  = moderate;
+  document.getElementById('lowRiskCount').textContent       = low;
+}
+
+function renderTimestamp() {
+  const first = state.districtData.find(d => d.updated_at);
+  const ts = first ? new Date(first.updated_at.replace(' ', 'T')) : new Date();
+  document.getElementById('appTimestamp').textContent = ts.toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true,
   });
-
-  // We need a lat/lng — derive from geojson centroid. Since we can't easily
-  // get it without turf, we'll use known approximate district centroids.
-  const centroid = DISTRICT_CENTROIDS[d.district];
-  if (!centroid) return;
-
-  const marker = L.marker(centroid, { icon, zIndexOffset: 1000 });
-  marker.bindTooltip(makeTooltip(d), { opacity: 1, offset: [0, -32] });
-  marker.on('click', () => selectDistrict(d));
-  marker.addTo(state.map);
-  state.markers.push(marker);
 }
 
-function makeTooltip(d) {
-  return `<div>
-    <div class="tt-name">${d.district}</div>
-    <div class="tt-river">${(d.river || '').replace(/_/g,' ')} River</div>
-    <div class="tt-badge ${d.risk}">${d.risk.toUpperCase()}</div>
-    ${d.pct_to_danger ? `<div class="tt-pct">${d.pct_to_danger}% to danger</div>` : ''}
-  </div>`;
-}
+function renderMapLayer() {
+  if (!state.geojsonData) return;
 
-// Approximate centroids for Assam districts [lat, lng]
-const DISTRICT_CENTROIDS = {
-  'Kamrup Metro':  [26.1445, 91.7362],
-  'Kamrup':        [26.3058, 91.3740],
-  'Morigaon':      [26.2500, 92.3300],
-  'Nagaon':        [26.3472, 92.6836],
-  'Golaghat':      [26.5190, 93.9690],
-  'Jorhat':        [26.7509, 94.2037],
-  'Majuli':        [27.0000, 94.1667],
-  'Sivasagar':     [26.9800, 94.6350],
-  'Dibrugarh':     [27.4728, 94.9120],
-  'Tinsukia':      [27.4893, 95.3596],
-  'Lakhimpur':     [27.2340, 94.1020],
-  'Dhemaji':       [27.4826, 94.5660],
-  'Sonitpur':      [26.6340, 92.7970],
-  'Biswanath':     [26.7340, 93.1450],
-  'Darrang':       [26.4830, 91.9860],
-  'Udalguri':      [26.7540, 92.1060],
-  'Barpeta':       [26.3240, 91.0020],
-  'Nalbari':       [26.4430, 91.4350],
-  'Chirang':       [26.5880, 90.5710],
-  'Bongaigaon':    [26.4770, 90.5580],
-  'Kokrajhar':     [26.4010, 90.2700],
-  'Dhubri':        [26.0200, 89.9750],
-  'Goalpara':      [26.1720, 90.6220],
-  'South Salmara': [25.9100, 89.9900],
-  'Cachar':        [24.8330, 92.7580],
-  'Hailakandi':    [24.6840, 92.5610],
-  'Karimganj':     [24.8640, 92.3510],
-  'Dima Hasao':    [25.5740, 93.0200],
-  'Karbi Anglong': [26.1330, 93.8220],
-  'West Karbi':    [26.3000, 93.1000],
-  'Charaideo':     [27.0200, 94.8350],
-  'Hojai':         [26.0050, 92.8500],
-  'Bajali':        [26.4600, 91.2500],
-};
-
-// ── Summary Strip ─────────────────────────────────────────────────────
-function renderSummaryStrip() {
-  const high = state.districts.filter(d => d.risk === 'high').length;
-  const mod  = state.districts.filter(d => d.risk === 'moderate').length;
-  const low  = state.districts.filter(d => d.risk === 'low').length;
-  document.getElementById('highCount').textContent = high;
-  document.getElementById('modCount').textContent  = mod;
-  document.getElementById('lowCount').textContent  = low;
-}
-
-// ── District selection ────────────────────────────────────────────────
-function selectDistrict(d) {
-  state.selected = d;
-  document.getElementById('panelEmpty').style.display   = 'none';
-  document.getElementById('panelContent').style.display = 'block';
-
-  // Header
-  document.getElementById('pcDistrictName').textContent = d.district;
-  document.getElementById('pcRiverName').textContent = `${(d.river||'').replace(/_/g,' ')} River`;
-  const badge = document.getElementById('pcRiskBadge');
-  badge.textContent = d.risk === 'high' ? 'High Risk' : d.risk === 'moderate' ? 'Moderate Risk' : 'Safe';
-  badge.className = `pc-risk-badge ${d.risk}`;
-
-  // Risk statement in plain English
-  const stmt = document.getElementById('riskStatement');
-  stmt.className = `risk-statement ${d.risk}`;
-  if (d.risk === 'high') {
-    stmt.textContent = `⚠ Flood danger in ${d.district}. The ${(d.river||'').replace(/_/g,' ')} River is at ${d.pct_to_danger}% of its danger level. Immediate precautions are advised.`;
-  } else if (d.risk === 'moderate') {
-    stmt.textContent = `🔶 Moderate flood risk in ${d.district}. The ${(d.river||'').replace(/_/g,' ')} River is rising and at ${d.pct_to_danger}% of the danger threshold. Stay prepared.`;
-  } else {
-    stmt.textContent = `✓ ${d.district} is currently safe. River levels are normal with no immediate flood threat.`;
+  state.layerIndex.clear();
+  if (state.geojsonLayer) {
+    state.geojsonLayer.remove();
+    state.geojsonLayer = null;
   }
 
-  // Water level visual indicator
-  const pct = Math.min(100, d.pct_to_danger || 0);
-  // Track is: 0-50% = safe (green), 50-75% = warning (orange), 75-100% = danger (red)
-  // Pin position across full bar
-  const indicator = document.getElementById('wlbIndicator');
-  indicator.style.left = `${Math.min(95, Math.max(5, pct))}%`;
-  const pinIcon = indicator.querySelector('.pin-icon');
-  pinIcon.className = `pin-icon ${d.risk}`;
-  document.getElementById('wlbLevelVal').textContent = (d.river_level || 0).toFixed(2) + 'm';
+  state.geojsonLayer = L.geoJSON(state.geojsonData, {
+    style:          feature => districtStyle(getDistrictRecord(feature)),
+    onEachFeature:  (feature, layer) => {
+      const record       = getDistrictRecord(feature);
+      const districtName = record ? record.district : getFeatureName(feature);
 
-  // Note below bar
-  document.getElementById('wlbNote').textContent = pct >= 90
-    ? `⛔ Above danger level (${d.danger_level}m). Evacuate low-lying areas.`
-    : pct >= 65
-    ? `⚠ Above warning level (${d.warning_level}m). Stay alert for sudden rises.`
-    : `River level is within safe range. Warning threshold: ${d.warning_level}m.`;
+      layer.bindTooltip(
+        tooltipMarkup(districtName, record ? record.risk_percent : 0),
+        { sticky: true, direction: 'top', className: 'district-tooltip' }
+      );
 
-  // Rainfall
-  document.getElementById('rainToday').textContent = (d.rain_1d || d.rain_3d/3 || 0).toFixed(1) + ' mm';
-  document.getElementById('rain3d').textContent    = (d.rain_3d || 0).toFixed(1) + ' mm';
-  document.getElementById('rain7d').textContent    = (d.rain_7d || 0).toFixed(1) + ' mm';
+      layer.on('mouseover', () => {
+        layer.setStyle(hoverDistrictStyle(record, districtName));
+        layer.bringToFront();
+      });
+      layer.on('mouseout', () => {
+        layer.setStyle(districtStyle(record, districtName));
+      });
+      layer.on('click', () => {
+        if (!record) return;
+        openPanel(record);
+        focusDistrict(layer);
+      });
 
-  // Forecast
-  const fcRow = document.getElementById('forecastRow');
-  fcRow.innerHTML = '';
-  (d.forecast || []).forEach(f => {
-    const riskClass = f.pct >= 90 ? 'high' : f.pct >= 65 ? 'moderate' : 'low';
-    const riskWord  = riskClass === 'high' ? 'High Risk' : riskClass === 'moderate' ? 'Moderate' : 'Safe';
-    fcRow.innerHTML += `
-      <div class="fc-item ${riskClass}">
-        <div class="fc-date">${f.date}</div>
-        <div class="fc-level">${f.level}m</div>
-        <div class="fc-risk-label">${riskWord}</div>
-      </div>`;
-  });
+      state.layerIndex.set(normalizeDistrictName(districtName), layer);
+    },
+  }).addTo(state.map);
 
-  // Crop card
-  const cropCard = document.getElementById('cropCard');
-  if (d.crop_ha && d.crop_ha > 100 && d.risk !== 'low') {
-    cropCard.style.display = 'block';
-    document.getElementById('cropNumber').textContent = d.crop_ha.toLocaleString('en-IN');
-  } else {
-    cropCard.style.display = 'none';
-  }
-
-  // Factors (plain English SHAP)
-  const fl = document.getElementById('factorsList');
-  fl.innerHTML = '';
-  const factors = (d.shap_features || []).slice(0, 5);
-  factors.forEach(f => {
-    const meta = FACTOR_ICONS[f.feature] || { icon: '•', label: f.label };
-    const barW = Math.min(100, Math.abs(f.contribution) * 180);
-    const dir  = f.contribution > 0 ? 'up' : 'down';
-    const effect = dir === 'up'
-      ? 'is <strong>increasing</strong> the flood risk'
-      : 'is <strong>reducing</strong> the flood risk';
-    fl.innerHTML += `
-      <div class="factor-item">
-        <div class="factor-icon">${meta.icon}</div>
-        <div class="factor-text">${meta.label} ${effect}</div>
-        <div class="factor-bar">
-          <div class="fb-track">
-            <div class="fb-fill ${dir}" style="width:${barW}%"></div>
-          </div>
-          <div class="fb-dir ${dir}">${dir === 'up' ? '↑ risk' : '↓ risk'}</div>
-        </div>
-      </div>`;
-  });
-
-  // Advisory
-  const advHeader = document.getElementById('advHeader');
-  advHeader.className = `adv-header ${d.risk}`;
-  const icons = { high: '⚠️', moderate: '🔶', low: '✅' };
-  const titles = { high: 'Flood Warning — Take Immediate Action', moderate: 'Flood Watch — Be Prepared', low: 'Conditions are Safe' };
-  document.getElementById('advIcon').textContent  = icons[d.risk];
-  document.getElementById('advTitle').textContent = titles[d.risk];
-  const tips = document.getElementById('advTips');
-  tips.innerHTML = (TIPS[d.risk] || TIPS.low).map(t => `<li>${t}</li>`).join('');
-
-  // Scroll panel to top
-  document.getElementById('sidePanel').scrollTop = 0;
+  const geoBounds = state.geojsonLayer.getBounds().pad(0.03);
+  state.map.setMaxBounds(geoBounds);
+  state.map.fitBounds(geoBounds, { padding: [18, 18] });
 }
 
-function clearSelection() {
-  state.selected = null;
-  document.getElementById('panelEmpty').style.display   = 'block';
-  document.getElementById('panelContent').style.display = 'none';
+function districtStyle(record, fallbackName = '') {
+  const riskKey  = record ? record.risk : 'low';
+  const palette  = RISK_STYLES[riskKey] || RISK_STYLES.low;
+  const selected = normalizeDistrictName(record ? record.district : fallbackName) ===
+                   normalizeDistrictName(state.selectedDistrict || '');
+  return {
+    fillColor:   palette.fill,
+    fillOpacity: selected ? 0.62 : 0.5,
+    color:       selected ? '#0f172a' : palette.stroke,
+    weight:      selected ? 2.8 : 1.15,
+    opacity:     0.95,
+    lineJoin:    'round',
+  };
+}
+
+function hoverDistrictStyle(record, fallbackName = '') {
+  const base = districtStyle(record, fallbackName);
+  return { ...base, fillOpacity: 0.68, weight: Math.max(base.weight, 2.4), color: '#0f172a' };
+}
+
+function tooltipMarkup(name, riskPercent) {
+  return `<div class="tooltip-name">${escapeHtml(name)}</div>
+          <div class="tooltip-risk">Flood risk: ${Number(riskPercent || 0).toFixed(0)}%</div>`;
+}
+
+function openPanel(record) {
+  state.selectedDistrict = record.district;
+  document.body.classList.add('panel-open');
+  document.getElementById('sidePanel').setAttribute('aria-hidden', 'false');
+  document.getElementById('panelEmpty').hidden = true;
+  document.getElementById('panelBody').hidden  = false;
+
+  const riskKey     = record.risk || classifyRisk(record.risk_percent);
+  const riskMeta    = RISK_STYLES[riskKey] || RISK_STYLES.low;
+  const lastRain    = record.last_rainfall || {};
+
+  document.getElementById('panelDistrictName').textContent  = record.district;
+  document.getElementById('panelSubtitle').textContent      = `${riskMeta.text} flood risk · district-level monitoring`;
+
+  const riskLabel = document.getElementById('panelRiskLabel');
+  riskLabel.textContent = riskMeta.text;
+  riskLabel.className   = `risk-pill ${riskKey}`;
+
+  document.getElementById('panelRiskPercent').textContent = `${Number(record.risk_percent || 0).toFixed(0)}% flood risk`;
+  document.getElementById('panelRiverMeta').textContent   = `Primary river: ${formatRiverName(record.river)}`;
+
+  updatePointer('currentPointer',  record.current_level_pct);
+  updatePointer('forecastPointer', record.predicted_level_3d_pct);
+  document.getElementById('currentLevelValue').textContent  = `${formatMeters(record.river_level)} m`;
+  document.getElementById('forecastLevelValue').textContent = `${formatMeters(record.predicted_level_3d)} m`;
+
+  document.getElementById('rainDate').textContent   = lastRain.date      || '-';
+  document.getElementById('rainTime').textContent   = lastRain.time      || '-';
+  document.getElementById('rainAmount').textContent = `${formatMillimeters(lastRain.amount_mm)} mm`;
+
+  renderForecast(record.forecast || []);
+  refreshLayerStyles();
+  document.getElementById('sidePanel').scrollTop  = 0;
+  document.getElementById('panelBody').scrollTop  = 0;
+}
+
+function closePanel() {
+  state.selectedDistrict = null;
+  document.body.classList.remove('panel-open');
+  document.getElementById('sidePanel').setAttribute('aria-hidden', 'true');
+  document.getElementById('panelEmpty').hidden = false;
+  document.getElementById('panelBody').hidden  = true;
+  refreshLayerStyles();
+  if (state.geojsonLayer) {
+    state.map.fitBounds(state.geojsonLayer.getBounds().pad(0.03), { padding: [18, 18] });
+  }
+}
+
+function renderForecast(forecast) {
+  const container = document.getElementById('forecastGrid');
+  container.innerHTML = '';
+  forecast.forEach(day => {
+    const risk = classifyRisk(day.pct);
+    const item = document.createElement('div');
+    item.className = `forecast-card ${risk}`;
+    item.innerHTML = `<span class="forecast-date">${escapeHtml(day.date)}</span>
+                      <strong>${formatMeters(day.level)} m</strong>
+                      <span class="forecast-risk">${RISK_STYLES[risk].text}</span>`;
+    container.appendChild(item);
+  });
+}
+
+function updatePointer(elementId, value) {
+  const pointer = document.getElementById(elementId);
+  pointer.style.left = `${Math.max(4, Math.min(96, Number(value || 0)))}%`;
+}
+
+function focusDistrict(layer) {
+  state.map.fitBounds(layer.getBounds().pad(0.35), {
+    paddingTopLeft:     [24, 24],
+    paddingBottomRight: window.innerWidth > 900 ? [420, 24] : [24, 24],
+    maxZoom:            9.75,
+  });
+}
+
+function refreshLayerStyles() {
+  if (!state.geojsonLayer) return;
+  state.geojsonLayer.eachLayer(layer => {
+    const record       = getDistrictRecord(layer.feature);
+    const districtName = record ? record.district : getFeatureName(layer.feature);
+    layer.setStyle(districtStyle(record, districtName));
+  });
+}
+
+function syncSelectedDistrict() {
+  if (!state.selectedDistrict) return;
+  const record = findDistrictRecord(state.selectedDistrict);
+  if (!record) { closePanel(); return; }
+  openPanel(record);
+  const layer = state.layerIndex.get(normalizeDistrictName(record.district));
+  if (layer) focusDistrict(layer);
+}
+
+function getDistrictRecord(feature)  { return findDistrictRecord(getFeatureName(feature)); }
+function getFeatureName(feature)      { return feature?.properties?.DISTRICT || feature?.properties?.district || ''; }
+
+function findDistrictRecord(name) {
+  const n = normalizeDistrictName(name);
+  return state.districtData.find(d => normalizeDistrictName(d.district) === n) || null;
+}
+
+function normalizeDistrictName(name) {
+  return String(name || '').toLowerCase()
+    .replace(/metropolitan/g, 'metro')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function classifyRisk(riskPercent) {
+  const v = Number(riskPercent || 0);
+  return v > 70 ? 'high' : v > 40 ? 'moderate' : 'low';
+}
+
+function formatRiverName(name) {
+  const v = String(name || '-').replace(/_/g, ' ');
+  return v.charAt(0).toUpperCase() + v.slice(1);
+}
+
+function formatMeters(value)      { return Number(value || 0).toFixed(2); }
+function formatMillimeters(value) { return Number(value || 0).toFixed(1); }
+
+function setLoadingState(isLoading) {
+  const button = document.getElementById('refreshButton');
+  const label  = document.getElementById('refreshLabel');
+  button.disabled = isLoading;
+  button.classList.toggle('is-loading', isLoading);
+  label.textContent = isLoading ? 'Refreshing...' : 'Refresh';
+}
+
+function setMapStatus(text) {
+  const el = document.getElementById('mapStatus');
+  if (el) el.textContent = text;
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return res.json();
+}
+
+// ── FIX: poll /api/districts while server is still training (HTTP 202)
+async function fetchDistricts() {
+  let attempts = 0;
+  while (true) {
+    const res  = await fetch('/api/districts', { cache: 'no-store' });
+    const data = await res.json();
+    if (res.status === 202 && data.training) {
+      attempts++;
+      const msg = attempts === 1
+        ? 'ML models training… this takes ~10 seconds on first load.'
+        : `Still training… (${attempts * 3}s elapsed)`;
+      showOverlay(msg);
+      setMapStatus(msg);
+      await new Promise(r => setTimeout(r, 3000)); // wait 3s then retry
+      continue;
+    }
+    return data;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
