@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FloodSense Assam</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-inner">
+    <div class="header-left">
+      <div class="logo-mark"></div>
+      <div class="header-title">
+        <span class="title-main">FloodSense</span>
+        <span class="title-sub">Assam</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status-pill" id="statusPill">
+        <span class="status-dot"></span>
+        <span id="statusText">Loading models…</span>
+      </div>
+      <div class="header-meta">
+        <span class="meta-label">Updated</span>
+        <span class="meta-val" id="updateTime">—</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- Main layout -->
+<main class="main">
+
+  <!-- Left sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="section-eyebrow">District Risk</div>
+      <div class="risk-summary" id="riskSummary">
+        <div class="risk-chip high"><span class="chip-num" id="highCount">—</span><span class="chip-label">High</span></div>
+        <div class="risk-chip moderate"><span class="chip-num" id="modCount">—</span><span class="chip-label">Moderate</span></div>
+        <div class="risk-chip low"><span class="chip-num" id="lowCount">—</span><span class="chip-label">Low</span></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-eyebrow">Alert Districts</div>
+      <div class="alert-list" id="alertList">
+        <div class="skeleton-block"></div>
+        <div class="skeleton-block"></div>
+        <div class="skeleton-block"></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-eyebrow">Model Performance</div>
+      <div class="perf-grid" id="perfGrid">
+        <div class="perf-item">
+          <div class="perf-val" id="perfF1">—</div>
+          <div class="perf-label">F1 Score (flood)</div>
+        </div>
+        <div class="perf-item">
+          <div class="perf-val" id="perfPrecision">—</div>
+          <div class="perf-label">Precision</div>
+        </div>
+        <div class="perf-item">
+          <div class="perf-val" id="perfRecall">—</div>
+          <div class="perf-label">Recall</div>
+        </div>
+        <div class="perf-item">
+          <div class="perf-val" id="perfMacro">—</div>
+          <div class="perf-label">F1 Macro</div>
+        </div>
+      </div>
+      <div class="model-badge">Gradient Boosting · 60 estimators</div>
+    </div>
+  </aside>
+
+  <!-- Map column -->
+  <div class="map-column">
+    <div class="map-header">
+      <div class="map-title">33 Districts — ML Risk Classification</div>
+      <div class="map-legend">
+        <span class="legend-dot high"></span><span class="legend-label">High</span>
+        <span class="legend-dot moderate"></span><span class="legend-label">Moderate</span>
+        <span class="legend-dot low"></span><span class="legend-label">Low</span>
+      </div>
+    </div>
+    <div id="map"></div>
+    <div class="map-note">Click any district to view ML prediction details, SHAP feature contributions, and 3-day forecast</div>
+  </div>
+
+  <!-- Right panel: district detail -->
+  <div class="detail-panel" id="detailPanel">
+    <div class="detail-empty" id="detailEmpty">
+      <div class="empty-icon">◎</div>
+      <div class="empty-title">Select a district</div>
+      <div class="empty-sub">Click any district on the map to view the full ML prediction breakdown</div>
+    </div>
+
+    <div class="detail-content" id="detailContent" style="display:none">
+
+      <!-- District header -->
+      <div class="detail-header">
+        <div class="detail-district" id="detailDistrict">—</div>
+        <div class="detail-river" id="detailRiver">—</div>
+        <div class="detail-risk-badge" id="detailRiskBadge">—</div>
+      </div>
+
+      <!-- Level gauge -->
+      <div class="detail-section">
+        <div class="section-eyebrow">River Level</div>
+        <div class="gauge-wrap">
+          <div class="gauge-bar">
+            <div class="gauge-warning" id="gaugeWarning"></div>
+            <div class="gauge-danger-line" id="gaugeDangerLine"></div>
+            <div class="gauge-fill" id="gaugeFill"></div>
+          </div>
+          <div class="gauge-labels">
+            <span class="gauge-min" id="gaugeMin">—</span>
+            <span class="gauge-cur" id="gaugeCur">—m</span>
+            <span class="gauge-max" id="gaugeMax">—</span>
+          </div>
+          <div class="gauge-thresholds">
+            <span>⚠ <span id="gaugeWarn">—</span>m warning</span>
+            <span>⛔ <span id="gaugeDanger">—</span>m danger</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Key stats row -->
+      <div class="stats-row">
+        <div class="stat-box">
+          <div class="stat-val" id="statRain3">—</div>
+          <div class="stat-label">3-day rain (mm)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="statDelta">—</div>
+          <div class="stat-label">Level change</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="statConfidence">—</div>
+          <div class="stat-label">Confidence</div>
+        </div>
+      </div>
+
+      <!-- SHAP feature contributions -->
+      <div class="detail-section">
+        <div class="section-eyebrow">Why this prediction — top drivers</div>
+        <div class="shap-list" id="shapList"></div>
+      </div>
+
+      <!-- Crop damage -->
+      <div class="detail-section" id="cropSection" style="display:none">
+        <div class="section-eyebrow">Agricultural Impact Estimate</div>
+        <div class="crop-estimate">
+          <span class="crop-val" id="cropVal">—</span>
+          <span class="crop-label">hectares at risk</span>
+        </div>
+      </div>
+
+      <!-- 3-day forecast -->
+      <div class="detail-section">
+        <div class="section-eyebrow">3-Day Level Forecast</div>
+        <div class="forecast-row" id="forecastRow"></div>
+      </div>
+
+      <!-- Probability bars -->
+      <div class="detail-section">
+        <div class="section-eyebrow">Class Probabilities</div>
+        <div class="prob-list" id="probList"></div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<!-- Bottom panel: charts -->
+<div class="bottom-panel">
+  <div class="bottom-tab-bar">
+    <button class="tab-btn active" data-tab="features">Feature Importance</button>
+    <button class="tab-btn" data-tab="historical">Historical Floods</button>
+    <button class="tab-btn" data-tab="model">Model Comparison</button>
+  </div>
+
+  <div class="tab-content active" id="tab-features">
+    <div class="chart-title">Top predictive features — Gradient Boosting model</div>
+    <canvas id="chartFeatures" height="80"></canvas>
+  </div>
+  <div class="tab-content" id="tab-historical">
+    <div class="chart-title">Annual flood impact in Assam (2014–2023) — ASDMA FRIMS data</div>
+    <canvas id="chartHistorical" height="80"></canvas>
+  </div>
+  <div class="tab-content" id="tab-model">
+    <div class="chart-title">Model comparison — Gradient Boosting vs Threshold baseline</div>
+    <div class="model-compare" id="modelCompare"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
