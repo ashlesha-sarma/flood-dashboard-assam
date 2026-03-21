@@ -1,98 +1,128 @@
-"""FloodSense Assam — Flask entry point.
-FIX: Models are trained in a background thread on startup so the server
-     accepts requests immediately. /api/districts returns a 202 with a
-     'training' flag while training is in progress; the JS retries.
-"""
+"""FloodSense Assam Flask entry point."""
+
 import logging
+import os
 import threading
+
 from flask import Flask, jsonify, render_template
+from flask_cors import CORS
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s — %(message)s',
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+CORS(app)
 
-# ── Background training state ─────────────────────────────────────────
-_training_done  = False
+BACKGROUND_TRAINING = os.environ.get("FLOODSENSE_BACKGROUND_TRAINING", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
+_training_done = False
 _training_error = None
+_training_thread = None
+_training_state_lock = threading.Lock()
 
 
-def _train_in_background():
+def _run_training():
     global _training_done, _training_error
     try:
-        logger.info("Background training started…")
+        logger.info("Model initialization started.")
         from services.ml_engine import _ensure_trained
+
         _ensure_trained()
         _training_done = True
-        logger.info("Background training complete.")
+        _training_error = None
+        logger.info("Model initialization complete.")
     except Exception as exc:
         _training_error = str(exc)
-        logger.exception("Background training failed: %s", exc)
+        logger.exception("Model initialization failed: %s", exc)
 
 
-# Start training immediately when the module loads (works for both
-# `python app.py` and gunicorn --preload).
-_thread = threading.Thread(target=_train_in_background, daemon=True)
-_thread.start()
+def _start_background_training():
+    global _training_thread
+    with _training_state_lock:
+        if _training_done:
+            return
+        if _training_thread and _training_thread.is_alive():
+            return
+        _training_thread = threading.Thread(target=_run_training, daemon=True)
+        _training_thread.start()
 
 
-# ── Error helper ──────────────────────────────────────────────────────
+def _ensure_ready():
+    if _training_done:
+        return True
+    if _training_error:
+        return False
+    if BACKGROUND_TRAINING:
+        _start_background_training()
+        return False
+    _run_training()
+    return _training_done
+
+
 def _err(msg, status=500):
     logger.error("API %d: %s", status, msg)
-    return jsonify({'error': True, 'message': msg}), status
+    return jsonify({"error": True, "message": msg}), status
 
 
-# ── Routes ────────────────────────────────────────────────────────────
-@app.route('/')
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
 
-@app.route('/api/districts')
+@app.route("/health")
+def health():
+    return jsonify({"ok": True, "training": not _training_done and not _training_error})
+
+
+@app.route("/api/districts")
 def api_districts():
-    """Return all district risk predictions.
-    While models are still training, returns HTTP 202 with training=True
-    so the frontend knows to retry after a short delay.
-    """
-    if _training_error:
-        return _err(f"Model training failed: {_training_error}")
-
-    if not _training_done:
-        # Still training — tell the client to retry
-        return jsonify({'training': True, 'districts': []}), 202
+    if not _ensure_ready():
+        if _training_error:
+            return _err(f"Model training failed: {_training_error}")
+        return jsonify({"training": True, "districts": []}), 202
 
     try:
         from services.ml_engine import get_all_districts_risk
-        return jsonify({'districts': get_all_districts_risk()})
+
+        return jsonify({"districts": get_all_districts_risk()})
     except Exception as exc:
-        logger.exception(exc)
+        logger.exception("District API failed: %s", exc)
         return _err(str(exc))
 
 
-@app.route('/api/metrics')
+@app.route("/api/metrics")
 def api_metrics():
-    if not _training_done:
-        return jsonify({'training': True}), 202
+    if not _ensure_ready():
+        if _training_error:
+            return _err(f"Model training failed: {_training_error}")
+        return jsonify({"training": True}), 202
+
     try:
         from services.ml_engine import get_model_metrics
+
         return jsonify(get_model_metrics())
     except Exception as exc:
-        logger.exception(exc)
+        logger.exception("Metrics API failed: %s", exc)
         return _err(str(exc))
 
 
-@app.route('/api/historical')
+@app.route("/api/historical")
 def api_historical():
     try:
         from services.ml_engine import get_historical_summary
+
         return jsonify(get_historical_summary())
     except Exception as exc:
-        logger.exception(exc)
+        logger.exception("Historical API failed: %s", exc)
         return _err(str(exc))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=False, port=5000)

@@ -1,79 +1,81 @@
 # FloodSense Assam
 
-A district-level flood risk and agricultural damage predictor for all 33 districts of Assam, India. Built with Gradient Boosting, Random Forest regression, and SHAP-style feature attribution — visualised on an interactive Leaflet choropleth map.
+District-level flood risk and crop-impact dashboard for Assam, built with Flask, scikit-learn, and Leaflet.
 
-## Live Demo
-→ [Deploy on HuggingFace Spaces or Render]
+## Project Layout
 
-## ML Architecture
+```text
+floodsense-assam/
+|-- app.py
+|-- requirements.txt
+|-- Procfile
+|-- runtime.txt
+|-- services/
+|   |-- __init__.py
+|   |-- data_pipeline.py
+|   `-- ml_engine.py
+|-- static/
+|   |-- css/
+|   |-- data/
+|   `-- js/
+`-- templates/
+    `-- index.html
+```
 
-| Component | Model | Purpose |
-|-----------|-------|---------|
-| Risk classification | Gradient Boosting (60 estimators) | Predict low/moderate/high flood risk per district per day |
-| Crop damage | Random Forest Regressor | Estimate hectares of farmland at risk |
-| Explainability | Feature contribution scores | SHAP-style "why this prediction" per district |
-
-### Features engineered
-- River level (m) + percentage to danger level
-- 24h level change + 3-day trend
-- 1-day, 3-day, 7-day district rainfall (mm)
-- Upstream catchment rainfall proxy
-- Monsoon season binary flag
-
-### Evaluation (held-out 20% test set)
-| Metric | Gradient Boosting | Threshold Baseline |
-|--------|------------------|--------------------|
-| F1 (flood class) | ~0.90 | ~0.60 |
-| F1 Macro | ~0.88 | ~0.55 |
-
-## Quick Start
+## Local Run
 
 ```bash
-git clone https://github.com/yourname/floodsense-assam
-cd floodsense-assam
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
 python app.py
-# → http://localhost:5000
 ```
 
-Models train automatically on first run (~20 seconds).
+Open `http://127.0.0.1:5000`.
 
-## Data Sources
+The app now trains lazily on first API access instead of training during module import. If you want the old non-blocking `202 training` behavior locally, set:
 
-| Source | Data |
-|--------|------|
-| IMD Open Data Portal | District rainfall patterns |
-| CWC Flood Forecasting | River level thresholds |
-| ASDMA FRIMS | Annual flood impact statistics (2014–2023) |
-| OpenStreetMap | Base map tiles |
-
-## Project Structure
-
+```bash
+set FLOODSENSE_BACKGROUND_TRAINING=1
+python app.py
 ```
-floodsense/
-├── app.py                    # Flask API (4 endpoints)
-├── services/
-│   ├── data_pipeline.py      # Feature engineering + synthetic data generation
-│   └── ml_engine.py          # Model training, inference, SHAP attribution
-├── static/
-│   ├── css/main.css          # Dark editorial UI
-│   ├── js/app.js             # Map, charts, detail panel
-│   └── data/assam_districts.geojson
-├── templates/index.html      # Single-page dashboard
-└── requirements.txt
+
+## Production-Safe Model Workflow
+
+Best practice is to train once before deployment and save the artifacts:
+
+```bash
+python -m services.ml_engine
 ```
+
+That generates `services/model_artifacts.joblib`. On Render or Gunicorn, the app will load that file instead of retraining on startup.
+
+If the artifact file is missing, the app will train once on first request and then save it.
+
+## Render Deployment
+
+1. Push this repository to GitHub.
+2. In Render, create a new Web Service from the repo.
+3. Use these settings:
+
+```text
+Build Command: pip install -r requirements.txt
+Start Command: gunicorn --workers 1 --threads 4 app:app
+```
+
+4. Set environment variable `PYTHON_VERSION=3.11.9`.
+5. Optional: set `FLOODSENSE_BACKGROUND_TRAINING=1` only if you want `/api/districts` to return `202` while a background thread warms models. Leave it unset for the simplest production behavior.
+
+## Notes
+
+- Keep `.git/` if you are deploying from GitHub. Only exclude it if you are manually uploading a source archive.
+- `flask-cors` is enabled in `app.py`.
+- `GET /health` returns a simple readiness payload for uptime checks.
 
 ## API
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/districts` | Risk prediction for all 33 districts |
-| `GET /api/district/<n>` | Full detail: SHAP, forecast, probabilities |
-| `GET /api/metrics` | Model evaluation + feature importance |
-| `GET /api/historical` | ASDMA annual flood impact data |
-
-## Tech Stack
-Python · Flask · scikit-learn · NumPy · Pandas · Leaflet.js · Chart.js
-
-## License
-MIT
+- `GET /`
+- `GET /health`
+- `GET /api/districts`
+- `GET /api/metrics`
+- `GET /api/historical`
