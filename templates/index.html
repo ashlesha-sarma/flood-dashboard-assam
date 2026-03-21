@@ -63,11 +63,12 @@
     <main class="dashboard-shell">
       <section class="map-shell">
         <div id="map"></div>
+
+        <!-- FIX: updated text; map-status bottom pill REMOVED (was repetitive) -->
         <div class="map-overlay-card">
-          <span class="map-overlay-title">Assam</span>
-          <span class="map-overlay-copy">Hover for quick flood risk %. Click a district for detailed analytics.</span>
+          <span class="map-overlay-title">ASSAM</span>
+          <span class="map-overlay-copy">Hover a pin for flood risk %. Click to open district analytics.</span>
         </div>
-        <div class="map-status" id="mapStatus">Loading latest district data...</div>
       </section>
 
       <div class="panel-scrim" id="panelScrim"></div>
@@ -101,11 +102,17 @@
                 <div class="meter-segment low"></div>
                 <div class="meter-segment moderate"></div>
                 <div class="meter-segment high"></div>
+
+                <!-- FIX: current pointer faces UP (label above bar, needle hangs down) -->
                 <div class="meter-pointer current" id="currentPointer">
                   <span class="pointer-tag">Current</span>
+                  <div class="pointer-needle"></div>
                 </div>
+
+                <!-- FIX: forecast pointer faces DOWN (needle hangs up from bar, label below) -->
                 <div class="meter-pointer forecast" id="forecastPointer">
-                  <span class="pointer-tag">3 days</span>
+                  <div class="pointer-needle"></div>
+                  <span class="pointer-tag">3 Days</span>
                 </div>
               </div>
               <div class="meter-scale">
@@ -114,12 +121,12 @@
                 <span>High</span>
               </div>
               <div class="meter-values">
-                <div>
+                <div class="meter-value-current">
                   <span class="meter-value-label">Current water level</span>
                   <strong id="currentLevelValue">-</strong>
                 </div>
-                <div>
-                  <span class="meter-value-label">Predicted water level</span>
+                <div class="meter-value-forecast">
+                  <span class="meter-value-label">Predicted (3-day)</span>
                   <strong id="forecastLevelValue">-</strong>
                 </div>
               </div>
