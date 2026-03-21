@@ -71,18 +71,7 @@ def _err(msg, status=500):
     return jsonify({"error": True, "message": msg}), status
 
 
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-
-@app.route("/health")
-def health():
-    return jsonify({"ok": True, "training": not _training_done and not _training_error})
-
-
-@app.route("/api/districts")
-def api_districts():
+def _district_payload():
     if not _ensure_ready():
         if _training_error:
             return _err(f"Model training failed: {_training_error}")
@@ -95,6 +84,27 @@ def api_districts():
     except Exception as exc:
         logger.exception("District API failed: %s", exc)
         return _err(str(exc))
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/health")
+def health():
+    return jsonify({"ok": True, "training": not _training_done and not _training_error})
+
+
+@app.route("/api/districts")
+def api_districts():
+    return _district_payload()
+
+
+@app.route("/predict")
+@app.route("/api/predict")
+def predict():
+    return _district_payload()
 
 
 @app.route("/api/metrics")

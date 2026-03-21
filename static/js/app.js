@@ -1,5 +1,7 @@
 'use strict';
 
+console.log('[FloodSense] app.js loaded');
+
 const ASSAM_VIEW = {
   center:  [26.20, 92.94],
   bounds:  [[24.0, 89.45], [28.45, 96.15]],
@@ -48,9 +50,18 @@ const state = {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
-  initMap();
-  bindUI();
-  loadDashboardData();
+  console.log('[FloodSense] DOMContentLoaded fired');
+  try {
+    initMap();
+    bindUI();
+    loadDashboardData();
+  } catch (err) {
+    console.error('[FloodSense] bootstrap failed', err);
+  }
+});
+
+window.addEventListener('error', event => {
+  console.error('[FloodSense] window error', event.message, event.error);
 });
 
 function bindUI() {
@@ -95,6 +106,7 @@ function initMap() {
 
 async function loadDashboardData(options = {}) {
   if (state.loading) return;
+  console.log('[FloodSense] loadDashboardData triggered', options);
   state.loading = true;
   setLoadingState(true);
   showOverlay('Loading district risk data…');
@@ -344,6 +356,7 @@ function hideOverlay() {
 }
 
 async function fetchJson(url) {
+  console.log('[FloodSense] fetchJson', url);
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   return res.json();
@@ -352,6 +365,7 @@ async function fetchJson(url) {
 async function fetchDistricts() {
   let attempts = 0;
   while (true) {
+    console.log('[FloodSense] API CALL TRIGGERED /api/districts');
     const res  = await fetch('/api/districts', { cache: 'no-store' });
     const data = await res.json();
     if (res.status === 202 && data.training) {
