@@ -3,208 +3,220 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FloodSense Assam</title>
+<title>Assam Flood Risk Monitor — Government of Assam</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600&family=Noto+Serif:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
 
-<!-- Header -->
-<header class="header">
-  <div class="header-inner">
-    <div class="header-left">
-      <div class="logo-mark"></div>
-      <div class="header-title">
-        <span class="title-main">FloodSense</span>
-        <span class="title-sub">Assam</span>
+<!-- Government Header -->
+<header class="gov-header">
+  <div class="gov-header-inner">
+    <div class="gov-left">
+      <div class="emblem">
+        <svg width="44" height="44" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="22" cy="22" r="20" fill="#f0f7ff" stroke="#1a4a8a" stroke-width="2"/>
+          <circle cx="22" cy="22" r="6" fill="#1a4a8a"/>
+          <circle cx="22" cy="22" r="3" fill="#f0f7ff"/>
+          <line x1="22" y1="4" x2="22" y2="40" stroke="#1a4a8a" stroke-width="1.5"/>
+          <line x1="4" y1="22" x2="40" y2="22" stroke="#1a4a8a" stroke-width="1.5"/>
+          <line x1="9" y1="9" x2="35" y2="35" stroke="#1a4a8a" stroke-width="1" opacity="0.4"/>
+          <line x1="35" y1="9" x2="9" y2="35" stroke="#1a4a8a" stroke-width="1" opacity="0.4"/>
+        </svg>
+      </div>
+      <div class="gov-titles">
+        <div class="gov-main-title">Assam Flood Risk Monitoring System</div>
+        <div class="gov-sub-title">Disaster Management Authority · Government of Assam</div>
       </div>
     </div>
-    <div class="header-right">
-      <div class="status-pill" id="statusPill">
-        <span class="status-dot"></span>
-        <span id="statusText">Loading models…</span>
+    <div class="gov-right">
+      <div class="helpline-box">
+        <div class="helpline-label">Emergency Helpline</div>
+        <div class="helpline-num">1070</div>
       </div>
-      <div class="header-meta">
-        <span class="meta-label">Updated</span>
-        <span class="meta-val" id="updateTime">—</span>
+      <div class="status-box" id="statusBox">
+        <div class="status-dot-live" id="statusDot"></div>
+        <span id="statusText">Loading…</span>
       </div>
     </div>
   </div>
 </header>
 
-<!-- Main layout -->
-<main class="main">
+<!-- Alert Banner — only shows when high risk exists -->
+<div class="alert-banner" id="alertBanner" style="display:none">
+  <div class="ab-inner">
+    <span class="ab-icon">⚠️</span>
+    <span class="ab-text" id="alertBannerText">Flood alert active in multiple districts. Please follow official advisories.</span>
+    <button class="ab-close" onclick="document.getElementById('alertBanner').style.display='none'">✕</button>
+  </div>
+</div>
 
-  <!-- Left sidebar -->
-  <aside class="sidebar">
-    <div class="sidebar-section">
-      <div class="section-eyebrow">District Risk</div>
-      <div class="risk-summary" id="riskSummary">
-        <div class="risk-chip high"><span class="chip-num" id="highCount">—</span><span class="chip-label">High</span></div>
-        <div class="risk-chip moderate"><span class="chip-num" id="modCount">—</span><span class="chip-label">Moderate</span></div>
-        <div class="risk-chip low"><span class="chip-num" id="lowCount">—</span><span class="chip-label">Low</span></div>
-      </div>
+<!-- Summary Chips Row -->
+<div class="summary-strip" id="summaryStrip" style="display:none">
+  <div class="strip-inner">
+    <div class="strip-chip high-chip">
+      <div class="chip-num" id="highCount">0</div>
+      <div class="chip-label">⚠ High Risk</div>
     </div>
+    <div class="strip-chip mod-chip">
+      <div class="chip-num" id="modCount">0</div>
+      <div class="chip-label">🔶 Moderate</div>
+    </div>
+    <div class="strip-chip safe-chip">
+      <div class="chip-num" id="lowCount">0</div>
+      <div class="chip-label">✓ Safe</div>
+    </div>
+    <div class="strip-divider"></div>
+    <div class="legend-strip">
+      <div class="ls-item"><div class="ls-dot" style="background:#c0392b"></div><span>High Risk</span></div>
+      <div class="ls-item"><div class="ls-dot" style="background:#e67e22"></div><span>Moderate</span></div>
+      <div class="ls-item"><div class="ls-dot" style="background:#27ae60"></div><span>Safe</span></div>
+    </div>
+    <div class="strip-meta">Updated: <span id="updateTime">—</span></div>
+  </div>
+</div>
 
-    <div class="sidebar-section">
-      <div class="section-eyebrow">Alert Districts</div>
-      <div class="alert-list" id="alertList">
-        <div class="skeleton-block"></div>
-        <div class="skeleton-block"></div>
-        <div class="skeleton-block"></div>
-      </div>
-    </div>
+<!-- Body: Map + Side Panel -->
+<div class="app-layout">
 
-    <div class="sidebar-section">
-      <div class="section-eyebrow">Model Performance</div>
-      <div class="perf-grid" id="perfGrid">
-        <div class="perf-item">
-          <div class="perf-val" id="perfF1">—</div>
-          <div class="perf-label">F1 Score (flood)</div>
-        </div>
-        <div class="perf-item">
-          <div class="perf-val" id="perfPrecision">—</div>
-          <div class="perf-label">Precision</div>
-        </div>
-        <div class="perf-item">
-          <div class="perf-val" id="perfRecall">—</div>
-          <div class="perf-label">Recall</div>
-        </div>
-        <div class="perf-item">
-          <div class="perf-val" id="perfMacro">—</div>
-          <div class="perf-label">F1 Macro</div>
-        </div>
-      </div>
-      <div class="model-badge">Gradient Boosting · 60 estimators</div>
-    </div>
-  </aside>
-
-  <!-- Map column -->
-  <div class="map-column">
-    <div class="map-header">
-      <div class="map-title">33 Districts — ML Risk Classification</div>
-      <div class="map-legend">
-        <span class="legend-dot high"></span><span class="legend-label">High</span>
-        <span class="legend-dot moderate"></span><span class="legend-label">Moderate</span>
-        <span class="legend-dot low"></span><span class="legend-label">Low</span>
-      </div>
-    </div>
+  <!-- Map fills most of screen -->
+  <div class="map-area">
     <div id="map"></div>
-    <div class="map-note">Click any district to view ML prediction details, SHAP feature contributions, and 3-day forecast</div>
+    <div class="map-hint" id="mapHint">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="#1a4a8a"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+      Tap any district to see details
+    </div>
   </div>
 
-  <!-- Right panel: district detail -->
-  <div class="detail-panel" id="detailPanel">
-    <div class="detail-empty" id="detailEmpty">
-      <div class="empty-icon">◎</div>
-      <div class="empty-title">Select a district</div>
-      <div class="empty-sub">Click any district on the map to view the full ML prediction breakdown</div>
+  <!-- Right panel: detail -->
+  <div class="side-panel" id="sidePanel">
+
+    <!-- Empty state -->
+    <div class="panel-empty" id="panelEmpty">
+      <div class="pe-map-icon">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z" fill="#7f8c8d"/></svg>
+      </div>
+      <div class="pe-title">Select a District</div>
+      <div class="pe-sub">Click any district on the map to see its flood risk status, river conditions, and safety information.</div>
     </div>
 
-    <div class="detail-content" id="detailContent" style="display:none">
+    <!-- Detail content -->
+    <div class="panel-content" id="panelContent" style="display:none">
 
-      <!-- District header -->
-      <div class="detail-header">
-        <div class="detail-district" id="detailDistrict">—</div>
-        <div class="detail-river" id="detailRiver">—</div>
-        <div class="detail-risk-badge" id="detailRiskBadge">—</div>
+      <!-- Back + header -->
+      <div class="pc-header" id="pcHeader">
+        <button class="pc-back" onclick="clearSelection()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+          All Districts
+        </button>
+        <div class="pc-district-name" id="pcDistrictName">—</div>
+        <div class="pc-river-name" id="pcRiverName">— River</div>
+        <div class="pc-risk-badge" id="pcRiskBadge">Safe</div>
       </div>
 
-      <!-- Level gauge -->
-      <div class="detail-section">
-        <div class="section-eyebrow">River Level</div>
-        <div class="gauge-wrap">
-          <div class="gauge-bar">
-            <div class="gauge-warning" id="gaugeWarning"></div>
-            <div class="gauge-danger-line" id="gaugeDangerLine"></div>
-            <div class="gauge-fill" id="gaugeFill"></div>
+      <!-- Human-readable risk statement -->
+      <div class="risk-statement" id="riskStatement"></div>
+
+      <!-- Water Level Card -->
+      <div class="detail-card">
+        <div class="dc-title">🌊 River Water Level</div>
+        <div class="water-level-bar">
+          <div class="wlb-track">
+            <div class="wlb-segment safe-seg" title="Safe zone"></div>
+            <div class="wlb-segment warn-seg" title="Warning zone"></div>
+            <div class="wlb-segment danger-seg" title="Danger zone"></div>
           </div>
-          <div class="gauge-labels">
-            <span class="gauge-min" id="gaugeMin">—</span>
-            <span class="gauge-cur" id="gaugeCur">—m</span>
-            <span class="gauge-max" id="gaugeMax">—</span>
+          <div class="wlb-labels">
+            <span>Safe</span><span>Warning</span><span>Danger</span>
           </div>
-          <div class="gauge-thresholds">
-            <span>⚠ <span id="gaugeWarn">—</span>m warning</span>
-            <span>⛔ <span id="gaugeDanger">—</span>m danger</span>
+          <div class="wlb-indicator" id="wlbIndicator">
+            <svg class="pin-icon" viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+            </svg>
+            <span class="wlb-level-val" id="wlbLevelVal">—m</span>
+          </div>
+        </div>
+        <div class="wlb-note" id="wlbNote">—</div>
+      </div>
+
+      <!-- Rainfall Card -->
+      <div class="detail-card">
+        <div class="dc-title">🌧️ Recent Rainfall</div>
+        <div class="rain-row">
+          <div class="rain-box">
+            <div class="rain-amount" id="rainToday">—</div>
+            <div class="rain-lbl">Today</div>
+          </div>
+          <div class="rain-box">
+            <div class="rain-amount" id="rain3d">—</div>
+            <div class="rain-lbl">Last 3 Days</div>
+          </div>
+          <div class="rain-box">
+            <div class="rain-amount" id="rain7d">—</div>
+            <div class="rain-lbl">Last 7 Days</div>
           </div>
         </div>
       </div>
 
-      <!-- Key stats row -->
-      <div class="stats-row">
-        <div class="stat-box">
-          <div class="stat-val" id="statRain3">—</div>
-          <div class="stat-label">3-day rain (mm)</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-val" id="statDelta">—</div>
-          <div class="stat-label">Level change</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-val" id="statConfidence">—</div>
-          <div class="stat-label">Confidence</div>
-        </div>
-      </div>
-
-      <!-- SHAP feature contributions -->
-      <div class="detail-section">
-        <div class="section-eyebrow">Why this prediction — top drivers</div>
-        <div class="shap-list" id="shapList"></div>
-      </div>
-
-      <!-- Crop damage -->
-      <div class="detail-section" id="cropSection" style="display:none">
-        <div class="section-eyebrow">Agricultural Impact Estimate</div>
-        <div class="crop-estimate">
-          <span class="crop-val" id="cropVal">—</span>
-          <span class="crop-label">hectares at risk</span>
-        </div>
-      </div>
-
-      <!-- 3-day forecast -->
-      <div class="detail-section">
-        <div class="section-eyebrow">3-Day Level Forecast</div>
+      <!-- 3-Day Forecast -->
+      <div class="detail-card">
+        <div class="dc-title">📅 3-Day River Level Forecast</div>
         <div class="forecast-row" id="forecastRow"></div>
+        <div class="forecast-note">Forecast based on current trend. Actual levels depend on upstream rainfall.</div>
       </div>
 
-      <!-- Probability bars -->
-      <div class="detail-section">
-        <div class="section-eyebrow">Class Probabilities</div>
-        <div class="prob-list" id="probList"></div>
+      <!-- Crop Impact — conditional -->
+      <div class="detail-card crop-card" id="cropCard" style="display:none">
+        <div class="dc-title">🌾 Estimated Agricultural Impact</div>
+        <div class="crop-stat">
+          <span class="crop-number" id="cropNumber">—</span>
+          <span class="crop-unit">hectares of farmland at risk</span>
+        </div>
+        <div class="crop-note">Contact the Agriculture Department for assistance: <strong>0361-2237488</strong></div>
+      </div>
+
+      <!-- Why this prediction -->
+      <div class="detail-card">
+        <div class="dc-title">🔍 Key Factors Driving This Assessment</div>
+        <div class="factors-list" id="factorsList"></div>
+      </div>
+
+      <!-- Safety Advisory -->
+      <div class="advisory-card" id="advisoryCard">
+        <div class="adv-header" id="advHeader">
+          <div class="adv-icon" id="advIcon">✅</div>
+          <div class="adv-title" id="advTitle">No immediate threat</div>
+        </div>
+        <ul class="adv-tips" id="advTips"></ul>
+        <div class="adv-helpline">For emergencies: <strong>ASDMA Helpline 1070</strong></div>
       </div>
 
     </div>
   </div>
 
-</main>
+</div>
 
-<!-- Bottom panel: charts -->
-<div class="bottom-panel">
-  <div class="bottom-tab-bar">
-    <button class="tab-btn active" data-tab="features">Feature Importance</button>
-    <button class="tab-btn" data-tab="historical">Historical Floods</button>
-    <button class="tab-btn" data-tab="model">Model Comparison</button>
-  </div>
+<!-- Footer -->
+<div class="gov-footer">
+  <span>© Government of Assam — Disaster Management Authority</span>
+  <span class="footer-sep">·</span>
+  <span>Data Sources: IMD · CWC · ASDMA FRIMS</span>
+  <span class="footer-sep">·</span>
+  <span>ML Engine: Gradient Boosting · scikit-learn</span>
+</div>
 
-  <div class="tab-content active" id="tab-features">
-    <div class="chart-title">Top predictive features — Gradient Boosting model</div>
-    <canvas id="chartFeatures" height="80"></canvas>
-  </div>
-  <div class="tab-content" id="tab-historical">
-    <div class="chart-title">Annual flood impact in Assam (2014–2023) — ASDMA FRIMS data</div>
-    <canvas id="chartHistorical" height="80"></canvas>
-  </div>
-  <div class="tab-content" id="tab-model">
-    <div class="chart-title">Model comparison — Gradient Boosting vs Threshold baseline</div>
-    <div class="model-compare" id="modelCompare"></div>
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-card">
+    <div class="loading-spinner"></div>
+    <div class="loading-title">Assam Flood Risk Monitor</div>
+    <div class="loading-msg">Running ML risk assessment for all 33 districts…</div>
   </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="/static/js/app.js"></script>
 </body>
 </html>

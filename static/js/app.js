@@ -1,475 +1,407 @@
-/* FloodSense Assam — Main Application JS */
+/* FloodSense Assam — Application JS
+   Google Maps-style tiles, location pins, colored district borders, plain English UI
+*/
 
 'use strict';
 
-// ── State ────────────────────────────────────────────────────────────
 const state = {
   districts: [],
   metrics: null,
-  historical: null,
-  selectedDistrict: null,
+  selected: null,
   map: null,
   geojsonLayer: null,
-  charts: {},
+  markers: [],
 };
 
-const RISK_COLORS = { high: '#e05252', moderate: '#e8973a', low: '#4caf82' };
-const RISK_IDX    = { low: 0, moderate: 1, high: 2 };
+const RISK = {
+  high:     { color: '#c0392b', fill: 'rgba(192,57,43,0.18)', border: '#c0392b', weight: 3 },
+  moderate: { color: '#e67e22', fill: 'rgba(230,126,34,0.15)', border: '#e67e22', weight: 2.5 },
+  low:      { color: '#27ae60', fill: 'rgba(39,174,96,0.08)',  border: '#27ae60', weight: 1.5 },
+};
 
-// ── Boot ─────────────────────────────────────────────────────────────
+const TIPS = {
+  high: [
+    'Move to higher ground immediately if near a river or low-lying area',
+    'Do not attempt to cross flooded roads or bridges',
+    'Contact the ASDMA helpline (1070) for evacuation assistance',
+    'Carry essential documents and emergency supplies',
+    'Stay tuned to All India Radio (AIR) and official ASDMA updates',
+  ],
+  moderate: [
+    'Keep essential items ready in case of sudden rise in water level',
+    'Monitor river levels closely through local authorities',
+    'Avoid travelling to flood-prone areas unless necessary',
+    'Store drinking water and dry food for at least 3 days',
+    'Keep emergency contact numbers saved on your phone',
+  ],
+  low: [
+    'No immediate flood threat — continue monitoring weather updates',
+    'Check ASDMA website for seasonal flood preparedness guides',
+    'Ensure drains near your home are clear of blockages',
+    'Report any unusual rise in river or water body levels to local authorities',
+  ],
+};
+
+const FACTOR_ICONS = {
+  'river_level':   { icon: '🌊', label: 'River level' },
+  'pct_to_danger': { icon: '📏', label: 'Distance from danger level' },
+  'rain_3d':       { icon: '🌧️', label: '3-day rainfall' },
+  'rain_7d':       { icon: '☔', label: '7-day rainfall' },
+  'rain_1d':       { icon: '🌦️', label: "Today's rainfall" },
+  'level_delta':   { icon: '📈', label: 'Water level change' },
+  'level_trend':   { icon: '📊', label: 'River level trend' },
+  'upstream_3d':   { icon: '🏔️', label: 'Upstream catchment rain' },
+  'is_monsoon':    { icon: '🌀', label: 'Monsoon season active' },
+};
+
+// ── Boot ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   initMap();
-  initTabs();
-  loadAll();
+  loadData();
 });
 
-async function loadAll() {
-  setStatus('loading', 'Training models…');
+async function loadData() {
+  setStatus('loading', 'Loading risk data…');
   try {
-    const [distRes, metRes, histRes] = await Promise.all([
+    const [distRes, metRes] = await Promise.all([
       fetch('/api/districts'),
       fetch('/api/metrics'),
-      fetch('/api/historical'),
     ]);
-    state.districts  = (await distRes.json()).districts || [];
-    state.metrics    = await metRes.json();
-    state.historical = await histRes.json();
+    const distData = await distRes.json();
+    state.districts = distData.districts || [];
+    state.metrics = await metRes.json();
 
-    renderMap();
-    renderSidebar();
-    renderMetrics();
-    renderCharts();
-    document.getElementById('updateTime').textContent = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-    setStatus('ready', 'Models ready');
+    renderMapData();
+    renderSummaryStrip();
+    document.getElementById('updateTime').textContent =
+      new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    document.getElementById('loadingOverlay').style.display = 'none';
+    document.getElementById('summaryStrip').style.display = 'block';
+    setStatus('ready', 'Live data active');
   } catch (err) {
     console.error(err);
-    setStatus('loading', 'Error — retrying…');
-    setTimeout(loadAll, 3000);
+    setStatus('loading', 'Retrying…');
+    setTimeout(loadData, 3000);
   }
 }
 
 function setStatus(type, text) {
-  const dot  = document.querySelector('.status-dot');
-  const span = document.getElementById('statusText');
-  dot.className = 'status-dot ' + type;
-  span.textContent = text;
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot-live ' + type;
+  document.getElementById('statusText').textContent = text;
 }
 
-// ── Leaflet Map ───────────────────────────────────────────────────────
+// ── Map Init — Google Maps Light tiles ───────────────────────────────
 function initMap() {
-  state.map = L.map('map', { zoomControl: true, attributionControl: false });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 11,
-  }).addTo(state.map);
+  state.map = L.map('map', {
+    zoomControl: true,
+    attributionControl: false,
+    scrollWheelZoom: true,
+  });
+
+  // Google Maps-style road map tiles (Carto Light is closest free equivalent)
+  L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    { subdomains: 'abcd', maxZoom: 14 }
+  ).addTo(state.map);
+
+  // Move zoom control to top-right
+  state.map.zoomControl.setPosition('topright');
 }
 
-function renderMap() {
-  const riskByDistrict = {};
-  state.districts.forEach(d => { riskByDistrict[d.district] = d; });
+// ── Render map layers ─────────────────────────────────────────────────
+function renderMapData() {
+  const riskMap = {};
+  state.districts.forEach(d => { riskMap[d.district] = d; });
 
   fetch('/static/data/assam_districts.geojson')
     .then(r => r.json())
     .then(geojson => {
       if (state.geojsonLayer) state.geojsonLayer.remove();
+      state.markers.forEach(m => m.remove());
+      state.markers = [];
 
+      // GeoJSON district polygons with colored borders
       state.geojsonLayer = L.geoJSON(geojson, {
         style: feature => {
-          const name = feature.properties.district || feature.properties.DISTRICT || feature.properties.NAME_2 || '';
-          const d = findDistrict(name, riskByDistrict);
+          const name = getPropName(feature);
+          const d = matchDistrict(name, riskMap);
           const risk = d ? d.risk : 'low';
+          const s = RISK[risk];
           return {
-            fillColor:   RISK_COLORS[risk],
-            fillOpacity: risk === 'high' ? 0.55 : risk === 'moderate' ? 0.42 : 0.22,
-            color:       RISK_COLORS[risk],
-            weight:      1,
-            opacity:     0.5,
+            fillColor:   s.fill,
+            fillOpacity: 1,
+            color:       s.border,
+            weight:      s.weight,
+            opacity:     0.9,
+            dashArray:   risk === 'low' ? '4 3' : null,
           };
         },
         onEachFeature: (feature, layer) => {
-          const name = feature.properties.district || feature.properties.DISTRICT || feature.properties.NAME_2 || '';
-          const d = findDistrict(name, riskByDistrict);
+          const name = getPropName(feature);
+          const d = matchDistrict(name, riskMap);
 
-          layer.on({
-            mouseover(e) {
-              e.target.setStyle({ weight: 2, fillOpacity: 0.75 });
-              if (d) {
-                e.target.bindTooltip(makeTooltip(d), {
-                  className: 'leaflet-tooltip-dark', sticky: true
-                }).openTooltip();
-              }
-            },
-            mouseout(e) {
-              state.geojsonLayer.resetStyle(e.target);
-              e.target.closeTooltip();
-            },
-            click() {
-              if (d) selectDistrict(d);
-            },
+          if (!d) return;
+
+          // Tooltip on hover
+          layer.bindTooltip(makeTooltip(d), {
+            sticky: true, opacity: 1, className: '',
+          });
+
+          // Highlight on hover
+          layer.on('mouseover', e => {
+            const l = e.target;
+            l.setStyle({ weight: RISK[d.risk].weight + 1.5, fillOpacity: 0.35 });
+          });
+          layer.on('mouseout', e => {
+            state.geojsonLayer.resetStyle(e.target);
+          });
+          layer.on('click', () => {
+            selectDistrict(d);
+            document.getElementById('mapHint').classList.add('hidden');
           });
         },
       }).addTo(state.map);
 
-      state.map.fitBounds(state.geojsonLayer.getBounds(), { padding: [10, 10] });
+      state.map.fitBounds(state.geojsonLayer.getBounds(), { padding: [20, 20] });
+
+      // Add location pins for high + moderate districts
+      state.districts
+        .filter(d => d.risk !== 'low')
+        .forEach(d => addPin(d));
+
+      // Alert banner
+      const highCount = state.districts.filter(d => d.risk === 'high').length;
+      if (highCount > 0) {
+        const banner = document.getElementById('alertBanner');
+        const highNames = state.districts
+          .filter(d => d.risk === 'high')
+          .map(d => d.district)
+          .join(', ');
+        document.getElementById('alertBannerText').textContent =
+          `⚠ Flood alert active in: ${highNames}. Follow ASDMA advisories and call 1070 for help.`;
+        banner.style.display = 'block';
+        document.body.classList.add('has-alert');
+      }
     });
 }
 
-function findDistrict(geoName, riskByDistrict) {
+function getPropName(feature) {
+  return feature.properties?.district || feature.properties?.DISTRICT ||
+         feature.properties?.NAME_2   || feature.properties?.name || '';
+}
+
+function matchDistrict(geoName, riskMap) {
   if (!geoName) return null;
   const clean = geoName.trim();
-  if (riskByDistrict[clean]) return riskByDistrict[clean];
-  // Fuzzy: try partial match
-  for (const key of Object.keys(riskByDistrict)) {
+  if (riskMap[clean]) return riskMap[clean];
+  for (const key of Object.keys(riskMap)) {
     if (clean.toLowerCase().includes(key.toLowerCase()) ||
         key.toLowerCase().includes(clean.toLowerCase())) {
-      return riskByDistrict[key];
+      return riskMap[key];
     }
   }
   return null;
 }
 
+// ── Location Pin Markers ──────────────────────────────────────────────
+function addPin(d) {
+  // Get centroid of district from geojson (approximate via bounds of layer)
+  // We'll use a custom DivIcon shaped like a Google Maps pin
+  const pinColor = d.risk === 'high' ? '#c0392b' : '#e67e22';
+  const svgPin = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 32">
+      <path d="M12 0C7.58 0 4 3.58 4 8c0 7.5 8 16 8 16s8-8.5 8-16c0-4.42-3.58-8-8-8z"
+            fill="${pinColor}" stroke="white" stroke-width="1.2"/>
+      <circle cx="12" cy="8.5" r="3.2" fill="white"/>
+    </svg>`;
+
+  const icon = L.divIcon({
+    html: svgPin,
+    className: '',
+    iconSize: [28, 36],
+    iconAnchor: [14, 36],
+    tooltipAnchor: [0, -30],
+  });
+
+  // We need a lat/lng — derive from geojson centroid. Since we can't easily
+  // get it without turf, we'll use known approximate district centroids.
+  const centroid = DISTRICT_CENTROIDS[d.district];
+  if (!centroid) return;
+
+  const marker = L.marker(centroid, { icon, zIndexOffset: 1000 });
+  marker.bindTooltip(makeTooltip(d), { opacity: 1, offset: [0, -32] });
+  marker.on('click', () => selectDistrict(d));
+  marker.addTo(state.map);
+  state.markers.push(marker);
+}
+
 function makeTooltip(d) {
-  return `<div class="district-popup">
-    <div class="dp-name">${d.district}</div>
-    <div class="dp-river">${d.river || '—'} River</div>
-    <div class="dp-risk ${d.risk}">${d.risk}</div>
+  return `<div>
+    <div class="tt-name">${d.district}</div>
+    <div class="tt-river">${(d.river || '').replace(/_/g,' ')} River</div>
+    <div class="tt-badge ${d.risk}">${d.risk.toUpperCase()}</div>
+    ${d.pct_to_danger ? `<div class="tt-pct">${d.pct_to_danger}% to danger</div>` : ''}
   </div>`;
 }
 
-// ── Sidebar ───────────────────────────────────────────────────────────
-function renderSidebar() {
+// Approximate centroids for Assam districts [lat, lng]
+const DISTRICT_CENTROIDS = {
+  'Kamrup Metro':  [26.1445, 91.7362],
+  'Kamrup':        [26.3058, 91.3740],
+  'Morigaon':      [26.2500, 92.3300],
+  'Nagaon':        [26.3472, 92.6836],
+  'Golaghat':      [26.5190, 93.9690],
+  'Jorhat':        [26.7509, 94.2037],
+  'Majuli':        [27.0000, 94.1667],
+  'Sivasagar':     [26.9800, 94.6350],
+  'Dibrugarh':     [27.4728, 94.9120],
+  'Tinsukia':      [27.4893, 95.3596],
+  'Lakhimpur':     [27.2340, 94.1020],
+  'Dhemaji':       [27.4826, 94.5660],
+  'Sonitpur':      [26.6340, 92.7970],
+  'Biswanath':     [26.7340, 93.1450],
+  'Darrang':       [26.4830, 91.9860],
+  'Udalguri':      [26.7540, 92.1060],
+  'Barpeta':       [26.3240, 91.0020],
+  'Nalbari':       [26.4430, 91.4350],
+  'Chirang':       [26.5880, 90.5710],
+  'Bongaigaon':    [26.4770, 90.5580],
+  'Kokrajhar':     [26.4010, 90.2700],
+  'Dhubri':        [26.0200, 89.9750],
+  'Goalpara':      [26.1720, 90.6220],
+  'South Salmara': [25.9100, 89.9900],
+  'Cachar':        [24.8330, 92.7580],
+  'Hailakandi':    [24.6840, 92.5610],
+  'Karimganj':     [24.8640, 92.3510],
+  'Dima Hasao':    [25.5740, 93.0200],
+  'Karbi Anglong': [26.1330, 93.8220],
+  'West Karbi':    [26.3000, 93.1000],
+  'Charaideo':     [27.0200, 94.8350],
+  'Hojai':         [26.0050, 92.8500],
+  'Bajali':        [26.4600, 91.2500],
+};
+
+// ── Summary Strip ─────────────────────────────────────────────────────
+function renderSummaryStrip() {
   const high = state.districts.filter(d => d.risk === 'high').length;
   const mod  = state.districts.filter(d => d.risk === 'moderate').length;
   const low  = state.districts.filter(d => d.risk === 'low').length;
-
   document.getElementById('highCount').textContent = high;
   document.getElementById('modCount').textContent  = mod;
   document.getElementById('lowCount').textContent  = low;
-
-  // Alert list: high first, then moderate
-  const alerts = state.districts
-    .filter(d => d.risk !== 'low')
-    .sort((a, b) => RISK_IDX[b.risk] - RISK_IDX[a.risk]);
-
-  const list = document.getElementById('alertList');
-  list.innerHTML = '';
-
-  if (alerts.length === 0) {
-    list.innerHTML = '<div style="font-size:11px;color:var(--text-3);padding:4px 0">No active alerts</div>';
-    return;
-  }
-
-  alerts.forEach(d => {
-    const el = document.createElement('div');
-    el.className = 'alert-item';
-    el.innerHTML = `
-      <div class="alert-dot ${d.risk}"></div>
-      <div class="alert-district">${d.district}</div>
-      <div class="alert-pct">${d.pct_to_danger || 0}%</div>
-    `;
-    el.addEventListener('click', () => selectDistrict(d));
-    list.appendChild(el);
-  });
 }
 
-// ── District detail ───────────────────────────────────────────────────
+// ── District selection ────────────────────────────────────────────────
 function selectDistrict(d) {
-  state.selectedDistrict = d;
-
-  // Highlight in alert list
-  document.querySelectorAll('.alert-item').forEach(el => el.classList.remove('selected'));
-  document.querySelectorAll('.alert-item').forEach(el => {
-    if (el.querySelector('.alert-district')?.textContent === d.district) {
-      el.classList.add('selected');
-    }
-  });
-
-  document.getElementById('detailEmpty').style.display   = 'none';
-  document.getElementById('detailContent').style.display = 'block';
+  state.selected = d;
+  document.getElementById('panelEmpty').style.display   = 'none';
+  document.getElementById('panelContent').style.display = 'block';
 
   // Header
-  document.getElementById('detailDistrict').textContent = d.district;
-  document.getElementById('detailRiver').textContent = `${(d.river || '').replace(/_/g, ' ')} River`;
-  const badge = document.getElementById('detailRiskBadge');
-  badge.textContent  = d.risk;
-  badge.className    = `detail-risk-badge ${d.risk}`;
+  document.getElementById('pcDistrictName').textContent = d.district;
+  document.getElementById('pcRiverName').textContent = `${(d.river||'').replace(/_/g,' ')} River`;
+  const badge = document.getElementById('pcRiskBadge');
+  badge.textContent = d.risk === 'high' ? 'High Risk' : d.risk === 'moderate' ? 'Moderate Risk' : 'Safe';
+  badge.className = `pc-risk-badge ${d.risk}`;
 
-  // Gauge
-  const thr = { min: 0, warning: d.warning_level, danger: d.danger_level };
-  const pct = Math.min(100, d.pct_to_danger || 0);
-  const fill = document.getElementById('gaugeFill');
-  fill.style.width = pct + '%';
-  fill.className = `gauge-fill ${d.risk}`;
-
-  // Warning/danger lines
-  const span = thr.danger - 0; // relative
-  if (thr.warning && thr.danger) {
-    const warnPct = ((thr.warning - d.danger_level * 0.92) / (thr.danger - d.danger_level * 0.92) * 100);
-    document.getElementById('gaugeWarning').style.left = '75%';
-    document.getElementById('gaugeDangerLine').style.left = '92%';
-  }
-
-  document.getElementById('gaugeMin').textContent = d.warning_level ? (d.warning_level - 6).toFixed(0) : '—';
-  document.getElementById('gaugeCur').textContent = (d.river_level || 0).toFixed(2) + 'm';
-  document.getElementById('gaugeMax').textContent = d.danger_level ? (d.danger_level + 1).toFixed(0) : '—';
-  document.getElementById('gaugeWarn').textContent = d.warning_level || '—';
-  document.getElementById('gaugeDanger').textContent = d.danger_level || '—';
-
-  // Stats
-  document.getElementById('statRain3').textContent = (d.rain_3d || 0).toFixed(1);
-  const delta = d.level_delta || 0;
-  document.getElementById('statDelta').textContent = (delta > 0 ? '+' : '') + delta.toFixed(2) + 'm';
-  document.getElementById('statConfidence').textContent = ((d.confidence || 0) * 100).toFixed(0) + '%';
-
-  // SHAP features
-  const shapList = document.getElementById('shapList');
-  shapList.innerHTML = '';
-  (d.shap_features || []).forEach(f => {
-    const pctW = Math.min(50, Math.abs(f.contribution) * 200);
-    shapList.innerHTML += `
-      <div class="shap-item">
-        <div class="shap-label" title="${f.label}">${f.label}</div>
-        <div class="shap-bar-wrap">
-          <div class="shap-bar-bg">
-            <div class="shap-bar-fill ${f.direction}" style="width:${pctW}%"></div>
-          </div>
-        </div>
-        <div class="shap-val">${f.direction === 'up' ? '+' : '−'}${Math.abs(f.contribution * 100).toFixed(0)}%</div>
-      </div>`;
-  });
-
-  // Crop estimate
-  const cropSec = document.getElementById('cropSection');
-  if (d.crop_ha && d.crop_ha > 0 && d.risk !== 'low') {
-    cropSec.style.display = 'block';
-    document.getElementById('cropVal').textContent = d.crop_ha.toLocaleString('en-IN');
+  // Risk statement in plain English
+  const stmt = document.getElementById('riskStatement');
+  stmt.className = `risk-statement ${d.risk}`;
+  if (d.risk === 'high') {
+    stmt.textContent = `⚠ Flood danger in ${d.district}. The ${(d.river||'').replace(/_/g,' ')} River is at ${d.pct_to_danger}% of its danger level. Immediate precautions are advised.`;
+  } else if (d.risk === 'moderate') {
+    stmt.textContent = `🔶 Moderate flood risk in ${d.district}. The ${(d.river||'').replace(/_/g,' ')} River is rising and at ${d.pct_to_danger}% of the danger threshold. Stay prepared.`;
   } else {
-    cropSec.style.display = 'none';
+    stmt.textContent = `✓ ${d.district} is currently safe. River levels are normal with no immediate flood threat.`;
   }
+
+  // Water level visual indicator
+  const pct = Math.min(100, d.pct_to_danger || 0);
+  // Track is: 0-50% = safe (green), 50-75% = warning (orange), 75-100% = danger (red)
+  // Pin position across full bar
+  const indicator = document.getElementById('wlbIndicator');
+  indicator.style.left = `${Math.min(95, Math.max(5, pct))}%`;
+  const pinIcon = indicator.querySelector('.pin-icon');
+  pinIcon.className = `pin-icon ${d.risk}`;
+  document.getElementById('wlbLevelVal').textContent = (d.river_level || 0).toFixed(2) + 'm';
+
+  // Note below bar
+  document.getElementById('wlbNote').textContent = pct >= 90
+    ? `⛔ Above danger level (${d.danger_level}m). Evacuate low-lying areas.`
+    : pct >= 65
+    ? `⚠ Above warning level (${d.warning_level}m). Stay alert for sudden rises.`
+    : `River level is within safe range. Warning threshold: ${d.warning_level}m.`;
+
+  // Rainfall
+  document.getElementById('rainToday').textContent = (d.rain_1d || d.rain_3d/3 || 0).toFixed(1) + ' mm';
+  document.getElementById('rain3d').textContent    = (d.rain_3d || 0).toFixed(1) + ' mm';
+  document.getElementById('rain7d').textContent    = (d.rain_7d || 0).toFixed(1) + ' mm';
 
   // Forecast
-  const forecastRow = document.getElementById('forecastRow');
-  forecastRow.innerHTML = '';
+  const fcRow = document.getElementById('forecastRow');
+  fcRow.innerHTML = '';
   (d.forecast || []).forEach(f => {
-    const pctClass = f.pct >= 90 ? 'high' : f.pct >= 65 ? 'moderate' : 'low';
-    forecastRow.innerHTML += `
-      <div class="forecast-item">
-        <div class="forecast-date">${f.date}</div>
-        <div class="forecast-level">${f.level}m</div>
-        <div class="forecast-pct ${pctClass}">${f.pct.toFixed(0)}%</div>
+    const riskClass = f.pct >= 90 ? 'high' : f.pct >= 65 ? 'moderate' : 'low';
+    const riskWord  = riskClass === 'high' ? 'High Risk' : riskClass === 'moderate' ? 'Moderate' : 'Safe';
+    fcRow.innerHTML += `
+      <div class="fc-item ${riskClass}">
+        <div class="fc-date">${f.date}</div>
+        <div class="fc-level">${f.level}m</div>
+        <div class="fc-risk-label">${riskWord}</div>
       </div>`;
   });
 
-  // Probability bars
-  const probList = document.getElementById('probList');
-  const proba = d.probability || [1, 0, 0];
-  const labels = ['Low', 'Moderate', 'High'];
-  const keys   = ['low', 'moderate', 'high'];
-  probList.innerHTML = '';
-  labels.forEach((label, i) => {
-    const pct = (proba[i] * 100).toFixed(1);
-    probList.innerHTML += `
-      <div class="prob-item">
-        <div class="prob-label">${label}</div>
-        <div class="prob-bar-bg">
-          <div class="prob-bar-fill ${keys[i]}" style="width:${pct}%"></div>
+  // Crop card
+  const cropCard = document.getElementById('cropCard');
+  if (d.crop_ha && d.crop_ha > 100 && d.risk !== 'low') {
+    cropCard.style.display = 'block';
+    document.getElementById('cropNumber').textContent = d.crop_ha.toLocaleString('en-IN');
+  } else {
+    cropCard.style.display = 'none';
+  }
+
+  // Factors (plain English SHAP)
+  const fl = document.getElementById('factorsList');
+  fl.innerHTML = '';
+  const factors = (d.shap_features || []).slice(0, 5);
+  factors.forEach(f => {
+    const meta = FACTOR_ICONS[f.feature] || { icon: '•', label: f.label };
+    const barW = Math.min(100, Math.abs(f.contribution) * 180);
+    const dir  = f.contribution > 0 ? 'up' : 'down';
+    const effect = dir === 'up'
+      ? 'is <strong>increasing</strong> the flood risk'
+      : 'is <strong>reducing</strong> the flood risk';
+    fl.innerHTML += `
+      <div class="factor-item">
+        <div class="factor-icon">${meta.icon}</div>
+        <div class="factor-text">${meta.label} ${effect}</div>
+        <div class="factor-bar">
+          <div class="fb-track">
+            <div class="fb-fill ${dir}" style="width:${barW}%"></div>
+          </div>
+          <div class="fb-dir ${dir}">${dir === 'up' ? '↑ risk' : '↓ risk'}</div>
         </div>
-        <div class="prob-pct">${pct}%</div>
       </div>`;
   });
+
+  // Advisory
+  const advHeader = document.getElementById('advHeader');
+  advHeader.className = `adv-header ${d.risk}`;
+  const icons = { high: '⚠️', moderate: '🔶', low: '✅' };
+  const titles = { high: 'Flood Warning — Take Immediate Action', moderate: 'Flood Watch — Be Prepared', low: 'Conditions are Safe' };
+  document.getElementById('advIcon').textContent  = icons[d.risk];
+  document.getElementById('advTitle').textContent = titles[d.risk];
+  const tips = document.getElementById('advTips');
+  tips.innerHTML = (TIPS[d.risk] || TIPS.low).map(t => `<li>${t}</li>`).join('');
+
+  // Scroll panel to top
+  document.getElementById('sidePanel').scrollTop = 0;
 }
 
-// ── Metrics ───────────────────────────────────────────────────────────
-function renderMetrics() {
-  const m = state.metrics;
-  if (!m) return;
-  const gb = m.gradient_boosting || {};
-  document.getElementById('perfF1').textContent        = gb.f1_flood || '—';
-  document.getElementById('perfPrecision').textContent = gb.precision || '—';
-  document.getElementById('perfRecall').textContent    = gb.recall || '—';
-  document.getElementById('perfMacro').textContent     = gb.f1_macro || '—';
-}
-
-// ── Charts ────────────────────────────────────────────────────────────
-function renderCharts() {
-  renderFeatureChart();
-  renderHistoricalChart();
-  renderModelCompare();
-}
-
-const CHART_DEFAULTS = {
-  color: '#f0ede8',
-  borderColor: 'rgba(255,255,255,0.07)',
-  gridColor: 'rgba(255,255,255,0.05)',
-  font: { family: "'DM Sans', sans-serif", size: 11 },
-};
-
-function renderFeatureChart() {
-  const fi = (state.metrics?.feature_importance || []).slice(0, 8);
-  if (!fi.length) return;
-
-  const ctx = document.getElementById('chartFeatures').getContext('2d');
-  if (state.charts.features) state.charts.features.destroy();
-
-  state.charts.features = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: fi.map(f => f.label),
-      datasets: [{
-        data: fi.map(f => +(f.importance * 100).toFixed(1)),
-        backgroundColor: fi.map((_, i) =>
-          i === 0 ? '#e8c547' : i === 1 ? '#e8c54799' : 'rgba(232,197,71,0.25)'
-        ),
-        borderWidth: 0,
-        borderRadius: 3,
-      }],
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: {
-        backgroundColor: '#1a1c1f',
-        borderColor: 'rgba(255,255,255,0.1)',
-        borderWidth: 1,
-        titleColor: '#f0ede8',
-        bodyColor: '#9a9690',
-        callbacks: { label: ctx => ` ${ctx.parsed.x.toFixed(1)}% importance` },
-      }},
-      scales: {
-        x: {
-          ticks: { color: '#5c5a56', font: CHART_DEFAULTS.font },
-          grid: { color: CHART_DEFAULTS.gridColor },
-          border: { color: 'transparent' },
-        },
-        y: {
-          ticks: { color: '#9a9690', font: { ...CHART_DEFAULTS.font, size: 10 } },
-          grid: { display: false },
-          border: { color: 'transparent' },
-        },
-      },
-    },
-  });
-}
-
-function renderHistoricalChart() {
-  const h = state.historical;
-  if (!h) return;
-
-  const ctx = document.getElementById('chartHistorical').getContext('2d');
-  if (state.charts.historical) state.charts.historical.destroy();
-
-  state.charts.historical = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: h.years,
-      datasets: [
-        {
-          label: 'People affected (M)',
-          data: h.people_affected.map(v => +(v / 1e6).toFixed(2)),
-          backgroundColor: 'rgba(224,82,82,0.6)',
-          borderWidth: 0,
-          borderRadius: 3,
-          yAxisID: 'y',
-        },
-        {
-          label: 'Crop area (× 10k ha)',
-          data: h.crop_area_ha.map(v => +(v / 10000).toFixed(1)),
-          backgroundColor: 'rgba(232,151,58,0.5)',
-          borderWidth: 0,
-          borderRadius: 3,
-          yAxisID: 'y2',
-          type: 'line',
-          borderColor: '#e8973a',
-          pointBackgroundColor: '#e8973a',
-          pointRadius: 3,
-          tension: 0.4,
-          fill: false,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index' },
-      plugins: {
-        legend: {
-          labels: { color: '#9a9690', font: CHART_DEFAULTS.font, boxWidth: 10 },
-          position: 'top',
-          align: 'end',
-        },
-        tooltip: {
-          backgroundColor: '#1a1c1f',
-          borderColor: 'rgba(255,255,255,0.1)',
-          borderWidth: 1,
-          titleColor: '#f0ede8',
-          bodyColor: '#9a9690',
-        },
-      },
-      scales: {
-        x: {
-          ticks: { color: '#5c5a56', font: CHART_DEFAULTS.font },
-          grid: { color: CHART_DEFAULTS.gridColor },
-          border: { color: 'transparent' },
-        },
-        y: {
-          ticks: { color: '#9a9690', font: CHART_DEFAULTS.font },
-          grid: { color: CHART_DEFAULTS.gridColor },
-          border: { color: 'transparent' },
-        },
-        y2: {
-          position: 'right',
-          ticks: { color: '#9a9690', font: CHART_DEFAULTS.font },
-          grid: { display: false },
-          border: { color: 'transparent' },
-        },
-      },
-    },
-  });
-}
-
-function renderModelCompare() {
-  const m = state.metrics;
-  if (!m) return;
-
-  const gb   = m.gradient_boosting || {};
-  const base = m.threshold_baseline || {};
-
-  document.getElementById('modelCompare').innerHTML = `
-    <div class="compare-card">
-      <div class="compare-name">Gradient Boosting</div>
-      <div class="compare-metrics">
-        <div class="cm-item"><div class="cm-val">${gb.f1_flood || '—'}</div><div class="cm-label">F1 Flood</div></div>
-        <div class="cm-item"><div class="cm-val">${gb.f1_macro || '—'}</div><div class="cm-label">F1 Macro</div></div>
-        <div class="cm-item"><div class="cm-val">${gb.n_train ? (gb.n_train/1000).toFixed(1)+'k' : '—'}</div><div class="cm-label">Train size</div></div>
-      </div>
-    </div>
-    <div class="compare-card baseline">
-      <div class="compare-name">Threshold Baseline</div>
-      <div class="compare-metrics">
-        <div class="cm-item"><div class="cm-val">${base.f1_flood || '—'}</div><div class="cm-label">F1 Flood</div></div>
-        <div class="cm-item"><div class="cm-val">${base.f1_macro || '—'}</div><div class="cm-label">F1 Macro</div></div>
-        <div class="cm-item"><div class="cm-val">—</div><div class="cm-label">No training</div></div>
-      </div>
-    </div>`;
-}
-
-// ── Tabs ──────────────────────────────────────────────────────────────
-function initTabs() {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('tab-' + tab).classList.add('active');
-
-      // Re-render chart on tab switch (fixes canvas sizing)
-      if (tab === 'features' && state.charts.features) {
-        state.charts.features.resize();
-      }
-      if (tab === 'historical' && state.charts.historical) {
-        state.charts.historical.resize();
-      }
-    });
-  });
+function clearSelection() {
+  state.selected = null;
+  document.getElementById('panelEmpty').style.display   = 'block';
+  document.getElementById('panelContent').style.display = 'none';
 }
