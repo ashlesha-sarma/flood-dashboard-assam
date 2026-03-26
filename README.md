@@ -1,81 +1,122 @@
-# FloodSense Assam
+# Flood Dashboard Assam
 
-District-level flood risk and crop-impact dashboard for Assam, built with Flask, scikit-learn, and Leaflet.
+A real-time flood monitoring and visualization platform for Assam
 
-## Project Layout
+------------------------------------------------------------------------
 
-```text
-floodsense-assam/
-|-- app.py
-|-- requirements.txt
-|-- Procfile
-|-- runtime.txt
-|-- services/
-|   |-- __init__.py
-|   |-- data_pipeline.py
-|   `-- ml_engine.py
-|-- static/
-|   |-- css/
-|   |-- data/
-|   `-- js/
-`-- templates/
-    `-- index.html
+### 🚀 Live Demo
+
+[![Live
+Demo](https://img.shields.io/badge/Live%20Demo-Available-green?style=for-the-badge&logo=vercel)](LINK)
+
+------------------------------------------------------------------------
+
+### 🧱 Tech Stack
+
+![Next.js](https://img.shields.io/badge/Frontend-Next.js-black?style=for-the-badge&logo=nextdotjs)
+![Node.js](https://img.shields.io/badge/Backend-Node.js-339933?style=for-the-badge&logo=nodedotjs)
+![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-316192?style=for-the-badge&logo=postgresql)
+![Render](https://img.shields.io/badge/Deployment-Render-46E3B7?style=for-the-badge&logo=render)
+![Leaflet](https://img.shields.io/badge/Maps-Leaflet-199900?style=for-the-badge&logo=leaflet)
+
+------------------------------------------------------------------------
+
+### 🧠 Problem
+
+Flood-prone regions like Assam lack accessible, real-time visualization
+tools that consolidate flood data, making it difficult for users to
+understand affected areas quickly.
+
+------------------------------------------------------------------------
+
+### 💡 Solution
+
+This project provides an interactive dashboard that visualizes
+flood-related data on a map interface, enabling users to monitor
+affected regions, analyze patterns, and make informed decisions.
+
+------------------------------------------------------------------------
+
+### ✨ Features
+
+-   Interactive map-based flood visualization\
+-   Real-time or near real-time data updates\
+-   Region-wise flood status tracking\
+-   Clean and responsive UI for accessibility\
+-   API-driven architecture for scalability
+
+------------------------------------------------------------------------
+
+### 🧱 Tech Stack
+
+-   Frontend: Next.js / React\
+-   Backend: Node.js / Express\
+-   Database: PostgreSQL\
+-   Deployment: Vercel (frontend), Render (backend)\
+-   Maps & Visualization: Leaflet
+
+------------------------------------------------------------------------
+
+### 🏗️ Architecture
+
+Client (Next.js) → API Server (Node.js / Express) → PostgreSQL Database
+
+------------------------------------------------------------------------
+
+### ⚙️ Setup Instructions
+
+``` bash
+git clone LINK
+cd flood-dashboard-assam
+
+cd client
+npm install
+
+cd ../server
+npm install
+
+cp .env.example .env
+
+npm run dev
+
+cd ../client
+npm run dev
 ```
 
-## Local Run
+------------------------------------------------------------------------
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python app.py
-```
+### 📊 Key Highlights
 
-Open `http://127.0.0.1:5000`.
+-   Map-first UI for geospatial clarity\
+-   Modular backend API design\
+-   PostgreSQL integration for reliability\
+-   Optimized client-server communication\
+-   Component-based frontend architecture
 
-The app now trains lazily on first API access instead of training during module import. If you want the old non-blocking `202 training` behavior locally, set:
+------------------------------------------------------------------------
 
-```bash
-set FLOODSENSE_BACKGROUND_TRAINING=1
-python app.py
-```
+### 🚧 Challenges & Learnings
 
-## Production-Safe Model Workflow
+Challenges: - Efficient handling of geospatial data\
+- Managing API latency
 
-Best practice is to train once before deployment and save the artifacts:
+Learnings: - Full-stack system design\
+- Practical experience with map-based visualization
 
-```bash
-python -m services.ml_engine
-```
+------------------------------------------------------------------------
 
-That generates `services/model_artifacts.joblib`. On Render or Gunicorn, the app will load that file instead of retraining on startup.
+### 🔮 Future Improvements
 
-If the artifact file is missing, the app will train once on first request and then save it.
+-   Predictive flood analytics\
+-   Real-time alerts system\
+-   Enhanced mobile responsiveness
 
-## Render Deployment
+------------------------------------------------------------------------
 
-1. Push this repository to GitHub.
-2. In Render, create a new Web Service from the repo.
-3. Use these settings:
+### 👤 Author
 
-```text
-Build Command: pip install -r requirements.txt
-Start Command: gunicorn --workers 1 --threads 4 app:app
-```
+Ash Sam\
+Full Stack Developer
 
-4. Set environment variable `PYTHON_VERSION=3.11.9`.
-5. Optional: set `FLOODSENSE_BACKGROUND_TRAINING=1` only if you want `/api/districts` to return `202` while a background thread warms models. Leave it unset for the simplest production behavior.
-
-## Notes
-
-- Keep `.git/` if you are deploying from GitHub. Only exclude it if you are manually uploading a source archive.
-- `flask-cors` is enabled in `app.py`.
-- `GET /health` returns a simple readiness payload for uptime checks.
-
-## API
-
-- `GET /`
-- `GET /health`
-- `GET /api/districts`
-- `GET /api/metrics`
-- `GET /api/historical`
+GitHub: LINK\
+LinkedIn: LINK
