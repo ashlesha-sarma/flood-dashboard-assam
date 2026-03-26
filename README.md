@@ -3,7 +3,7 @@ District-Level Flood Risk Intelligence Dashboard
 
 Real-time ML-powered flood risk prediction across all 33 districts of Assam, monitoring 8 major rivers with 3-day forecasts and crop-impact estimates.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-floodsense--assam.onrender.com-0062FF?style=for-the-badge&logo=render&logoColor=white)](https://floodsense-assam.onrender.com)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-floodsense--assam.onrender.com-0062FF?style=for-the-badge&logo=render&logoColor=white)](https://flood-dashboard-assam.onrender.com)
 
 ---
 
