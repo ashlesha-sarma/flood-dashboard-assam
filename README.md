@@ -1,122 +1,59 @@
-# Flood Dashboard Assam
+# FloodSense Assam  
+District-Level Flood Risk Intelligence Dashboard
 
-A real-time flood monitoring and visualization platform for Assam
+Real-time ML-powered flood risk prediction across all 33 districts of Assam, monitoring 8 major rivers with 3-day forecasts and crop-impact estimates.
 
-------------------------------------------------------------------------
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-floodsense--assam.onrender.com-0062FF?style=for-the-badge&logo=render&logoColor=white)](https://floodsense-assam.onrender.com)
 
-### 🚀 Live Demo
-
-[![Live
-Demo](https://img.shields.io/badge/Live%20Demo-Available-green?style=for-the-badge&logo=vercel)](LINK)
-
-------------------------------------------------------------------------
+---
 
 ### 🧱 Tech Stack
 
-![Next.js](https://img.shields.io/badge/Frontend-Next.js-black?style=for-the-badge&logo=nextdotjs)
-![Node.js](https://img.shields.io/badge/Backend-Node.js-339933?style=for-the-badge&logo=nodedotjs)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Flask](https://img.shields.io/badge/Backend-Flask-000000?style=for-the-badge&logo=flask)
+![scikit-learn](https://img.shields.io/badge/ML-scikit--learn-F7931E?style=for-the-badge&logo=scikit-learn)
 ![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-316192?style=for-the-badge&logo=postgresql)
-![Render](https://img.shields.io/badge/Deployment-Render-46E3B7?style=for-the-badge&logo=render)
 ![Leaflet](https://img.shields.io/badge/Maps-Leaflet-199900?style=for-the-badge&logo=leaflet)
+![Render](https://img.shields.io/badge/Deployment-Render-46E3B7?style=for-the-badge&logo=render)
 
-------------------------------------------------------------------------
+---
 
 ### 🧠 Problem
 
-Flood-prone regions like Assam lack accessible, real-time visualization
-tools that consolidate flood data, making it difficult for users to
-understand affected areas quickly.
+Flood-prone regions like Assam lack accessible tools to quickly understand district-level flood risk and impact.
 
-------------------------------------------------------------------------
+---
 
 ### 💡 Solution
 
-This project provides an interactive dashboard that visualizes
-flood-related data on a map interface, enabling users to monitor
-affected regions, analyze patterns, and make informed decisions.
+A web dashboard combining ML-based risk classification with an interactive map to provide real-time flood intelligence and actionable insights.
 
-------------------------------------------------------------------------
+---
 
 ### ✨ Features
 
--   Interactive map-based flood visualization\
--   Real-time or near real-time data updates\
--   Region-wise flood status tracking\
--   Clean and responsive UI for accessibility\
--   API-driven architecture for scalability
+- District-level flood risk classification (Low / Moderate / High)  
+- Interactive map with real-time visualization  
+- 3-day river level forecasts  
+- Crop damage estimation  
+- Batch prediction across all districts  
 
-------------------------------------------------------------------------
-
-### 🧱 Tech Stack
-
--   Frontend: Next.js / React\
--   Backend: Node.js / Express\
--   Database: PostgreSQL\
--   Deployment: Vercel (frontend), Render (backend)\
--   Maps & Visualization: Leaflet
-
-------------------------------------------------------------------------
+---
 
 ### 🏗️ Architecture
 
-Client (Next.js) → API Server (Node.js / Express) → PostgreSQL Database
+Client (Leaflet UI) → Flask API → ML Engine → Data Pipeline
 
-------------------------------------------------------------------------
+---
 
-### ⚙️ Setup Instructions
+### ⚙️ Setup
 
-``` bash
-git clone LINK
+```bash
+git clone https://github.com/your-username/flood-dashboard-assam.git
 cd flood-dashboard-assam
 
-cd client
-npm install
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-cd ../server
-npm install
-
-cp .env.example .env
-
-npm run dev
-
-cd ../client
-npm run dev
-```
-
-------------------------------------------------------------------------
-
-### 📊 Key Highlights
-
--   Map-first UI for geospatial clarity\
--   Modular backend API design\
--   PostgreSQL integration for reliability\
--   Optimized client-server communication\
--   Component-based frontend architecture
-
-------------------------------------------------------------------------
-
-### 🚧 Challenges & Learnings
-
-Challenges: - Efficient handling of geospatial data\
-- Managing API latency
-
-Learnings: - Full-stack system design\
-- Practical experience with map-based visualization
-
-------------------------------------------------------------------------
-
-### 🔮 Future Improvements
-
--   Predictive flood analytics\
--   Real-time alerts system\
--   Enhanced mobile responsiveness
-
-------------------------------------------------------------------------
-
-### 👤 Author
-
-Ash Sam\
-Full Stack Developer
-
-GitHub: LINK\
-LinkedIn: LINK
+pip install -r requirements.txt
+python app.py
